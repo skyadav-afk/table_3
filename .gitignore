@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+create_table.sql
+extract_clickhouse_data.py
+promoted_patterns_*.csv
+data.md
