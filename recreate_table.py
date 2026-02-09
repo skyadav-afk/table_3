@@ -49,6 +49,10 @@ CREATE TABLE ai_service_behavior_memory
     support_days UInt16,
     confidence Float64,
 
+    -- New confidence columns (null for weekly patterns)
+    long_term Nullable(Float64),
+    recency Nullable(Float64),
+
     -- Temporal tracking (with time)
     first_seen DateTime,
     last_seen DateTime,
@@ -126,4 +130,3 @@ def recreate_table():
 
 if __name__ == "__main__":
     recreate_table()
-

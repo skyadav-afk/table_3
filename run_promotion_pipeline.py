@@ -14,10 +14,11 @@ import logging
 import clickhouse_connect
 
 # Import data fetching functions
-from fetch_data import fetch_data_to_dataframe, fetch_baseline_data, fetch_hourly_data
+from fetch_data import fetch_data_to_dataframe, fetch_baseline_data, fetch_baseline_30d_data, fetch_hourly_data
 
 # Import promotion logic
 from daily_weekly import promote_seasonality, get_baseline, median_delta, volume_ok, classify_baseline
+from drift import promote_drift
 
 # Import configuration
 from config import CONFIG
@@ -118,64 +119,83 @@ def run_promotion_pipeline():
         logger.info("\n" + "=" * 80)
         logger.info("STEP 1: Fetching Data from ClickHouse")
         logger.info("=" * 80)
-        
-        logger.info("\n[1/3] Fetching staging data from ai_detector_staging1...")
+
+        logger.info("\n[1/4] Fetching staging data from ai_detector_staging1...")
         staging_df = fetch_data_to_dataframe()
         logger.info(f"✓ Staging data loaded: {staging_df.shape[0]} rows, {staging_df.shape[1]} columns")
-        
-        logger.info("\n[2/3] Fetching baseline data from ai_baseline_view_2...")
+
+        logger.info("\n[2/4] Fetching baseline data from ai_baseline_view_2...")
         baseline_df = fetch_baseline_data()
         logger.info(f"✓ Baseline data loaded: {baseline_df.shape[0]} rows, {baseline_df.shape[1]} columns")
-        
-        logger.info("\n[3/3] Fetching hourly data from service_metrics_hourly_2...")
+
+        logger.info("\n[3/4] Fetching 30-day baseline data from ai_baseline_stats_30d...")
+        baseline_30d_df = fetch_baseline_30d_data()
+        logger.info(f"✓ 30-day baseline data loaded: {baseline_30d_df.shape[0]} rows, {baseline_30d_df.shape[1]} columns")
+
+        logger.info("\n[4/4] Fetching hourly data from service_metrics_hourly_2...")
         hourly_df = fetch_hourly_data()
         logger.info(f"✓ Hourly data loaded: {hourly_df.shape[0]} rows, {hourly_df.shape[1]} columns")
-        
+
         # Step 2: Promote daily patterns
         logger.info("\n" + "=" * 80)
         logger.info("STEP 2: Promoting Daily Patterns")
         logger.info("=" * 80)
-        
+
         logger.info("\nRunning daily pattern promotion logic...")
         daily_promoted_df = promote_seasonality(
             staging_df=staging_df,
             baseline_df=baseline_df,
+            baseline_30d_df=baseline_30d_df,
             hourly_df=hourly_df,
             mode="daily_candidate"
         )
         logger.info(f"✓ Daily patterns promoted: {len(daily_promoted_df)} patterns")
-        
+
         # Step 3: Promote weekly patterns
         logger.info("\n" + "=" * 80)
         logger.info("STEP 3: Promoting Weekly Patterns")
         logger.info("=" * 80)
-        
+
         logger.info("\nRunning weekly pattern promotion logic...")
         weekly_promoted_df = promote_seasonality(
             staging_df=staging_df,
             baseline_df=baseline_df,
+            baseline_30d_df=baseline_30d_df,
             hourly_df=hourly_df,
             mode="weekly_candidate"
         )
         logger.info(f"✓ Weekly patterns promoted: {len(weekly_promoted_df)} patterns")
-        
-        # Step 4: Combine results
+
+        # Step 4: Promote drift patterns
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 4: Combining Results")
+        logger.info("STEP 4: Promoting Drift Patterns")
         logger.info("=" * 80)
-        
-        logger.info("\nCombining daily and weekly promoted patterns...")
-        promoted_df = pd.concat([daily_promoted_df, weekly_promoted_df], ignore_index=True)
+
+        logger.info("\nRunning drift pattern detection logic...")
+        drift_promoted_df = promote_drift(
+            baseline_df=baseline_df,
+            baseline_30d_df=baseline_30d_df,
+            hourly_df=hourly_df
+        )
+        logger.info(f"✓ Drift patterns promoted: {len(drift_promoted_df)} patterns")
+
+        # Step 5: Combine results
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 5: Combining Results")
+        logger.info("=" * 80)
+
+        logger.info("\nCombining daily, weekly, and drift promoted patterns...")
+        promoted_df = pd.concat([daily_promoted_df, weekly_promoted_df, drift_promoted_df], ignore_index=True)
         logger.info(f"✓ Total promoted patterns: {len(promoted_df)} patterns")
 
-        # Step 5: Write to ClickHouse
+        # Step 6: Write to ClickHouse
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 5: Writing to ClickHouse")
+        logger.info("STEP 6: Writing to ClickHouse")
         logger.info("=" * 80)
 
         write_success = write_to_clickhouse(promoted_df)
 
-        # Step 6: Display summary
+        # Step 7: Display summary
         logger.info("\n" + "=" * 80)
         logger.info("PIPELINE SUMMARY")
         logger.info("=" * 80)
@@ -191,6 +211,7 @@ def run_promotion_pipeline():
         print(f"\n🎯 Patterns Promoted:")
         print(f"   - Daily patterns: {len(daily_promoted_df):,}")
         print(f"   - Weekly patterns: {len(weekly_promoted_df):,}")
+        print(f"   - Drift patterns: {len(drift_promoted_df):,}")
         print(f"   - Total promoted: {len(promoted_df):,}")
         
         if len(promoted_df) > 0:
@@ -237,4 +258,3 @@ if __name__ == "__main__":
         promoted_patterns.to_csv(output_file, index=False)
         logger.info(f"\n💾 Backup CSV saved to: {output_file}")
         print(f"\n💾 Backup CSV saved to: {output_file}")
-

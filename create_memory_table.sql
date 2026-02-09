@@ -1,7 +1,7 @@
--- Create ai_service_behavior_memory table
+-- Create ai_service_behavior_memory1 table
 -- This table stores promoted seasonal patterns for service behavior tracking
 
-CREATE TABLE IF NOT EXISTS ai_service_behavior_memory
+CREATE TABLE IF NOT EXISTS ai_service_behavior_memory1
 (
     -- Service identifiers
     application_id String,

@@ -25,6 +25,7 @@ CLICKHOUSE_CONFIG = {
 
 TABLE_NAME = 'ai_detector_staging1'
 BASELINE_VIEW = 'ai_baseline_view_2'
+BASELINE_VIEW_30D = 'ai_baseline_stats_30d'
 HOURLY_TABLE = 'service_metrics_hourly_2'  # Will try this first, fallback to ai_service_features_hourly
 
 
@@ -132,6 +133,53 @@ def fetch_baseline_data():
         raise
 
 
+def fetch_baseline_30d_data():
+    """
+    Connect to ClickHouse and fetch 30-day baseline data from ai_baseline_stats_30d
+    Fetches ALL columns and rows from the view
+
+    Returns:
+        pandas.DataFrame: DataFrame containing all columns and rows from ai_baseline_stats_30d
+    """
+    try:
+        logger.info("Connecting to ClickHouse server for 30-day baseline data...")
+
+        # Create ClickHouse client using HTTP interface
+        client = clickhouse_connect.get_client(
+            host=CLICKHOUSE_CONFIG['host'],
+            port=CLICKHOUSE_CONFIG['port'],
+            database=CLICKHOUSE_CONFIG['database'],
+            username=CLICKHOUSE_CONFIG['username'],
+            password=CLICKHOUSE_CONFIG['password']
+        )
+
+        # Test connection
+        version = client.command('SELECT version()')
+        logger.info(f"Successfully connected to ClickHouse version: {version}")
+
+        # Build query for 30-day baseline data - fetch ALL columns and rows
+        query = f"SELECT * FROM {BASELINE_VIEW_30D}"
+        logger.info(f"Executing query on {BASELINE_VIEW_30D}...")
+
+        # Execute query and get data as pandas DataFrame
+        df = client.query_df(query)
+
+        logger.info(f"Query executed successfully. Fetched {len(df)} rows with {len(df.columns)} columns")
+        logger.info(f"Columns: {', '.join(df.columns.tolist())}")
+
+        logger.info(f"30-day Baseline DataFrame created successfully with shape: {df.shape}")
+
+        # Close connection
+        client.close()
+        logger.info("Connection closed")
+
+        return df
+
+    except Exception as e:
+        logger.error(f"Error fetching 30-day baseline data: {str(e)}")
+        raise
+
+
 def fetch_hourly_data():
     """
     Connect to ClickHouse and fetch hourly metrics data
@@ -181,7 +229,10 @@ def fetch_hourly_data():
             ts_hour,
             success_rate_p50,
             p90_latency,
-            total_requests
+            total_requests,
+            total_windows,
+            hour,
+            day_of_week
         FROM {table_to_use}
         """
         logger.info(f"Executing query on {table_to_use}...")
@@ -268,9 +319,38 @@ def main():
         print(f"\n✓ Baseline DataFrame Info:")
         baseline_df.info()
 
+        # Fetch 30-day baseline data
+        logger.info("\n" + "=" * 60)
+        logger.info("TASK 3: Fetching 30-Day Baseline Data from ai_baseline_stats_30d")
+        logger.info("=" * 60)
+
+        baseline_30d_df = fetch_baseline_30d_data()
+
+        # Print 30-day baseline DataFrame information
+        logger.info("\n" + "=" * 60)
+        logger.info("30-DAY BASELINE DATA RESULTS")
+        logger.info("=" * 60)
+
+        print(f"\n✓ 30-Day Baseline DataFrame Shape: {baseline_30d_df.shape}")
+        print(f"  - Rows: {baseline_30d_df.shape[0]}")
+        print(f"  - Columns: {baseline_30d_df.shape[1]}")
+
+        print(f"\n✓ 30-Day Baseline Column Names:")
+        for i, col in enumerate(baseline_30d_df.columns, 1):
+            print(f"  {i}. {col}")
+
+        print(f"\n✓ 30-Day Baseline Data Types:")
+        print(baseline_30d_df.dtypes)
+
+        print(f"\n✓ 30-Day Baseline First 5 Rows:")
+        print(baseline_30d_df.head())
+
+        print(f"\n✓ 30-Day Baseline DataFrame Info:")
+        baseline_30d_df.info()
+
         # Fetch hourly data
         logger.info("\n" + "=" * 60)
-        logger.info("TASK 3: Fetching Hourly Data from service_metrics_hourly_2")
+        logger.info("TASK 4: Fetching Hourly Data from service_metrics_hourly_2")
         logger.info("=" * 60)
 
         hourly_df = fetch_hourly_data()
@@ -303,13 +383,14 @@ def main():
         logger.info("=" * 60)
         print(f"\n✓ Staging Data Shape: {staging_df.shape}")
         print(f"✓ Baseline Data Shape: {baseline_df.shape}")
+        print(f"✓ 30-Day Baseline Data Shape: {baseline_30d_df.shape}")
         print(f"✓ Hourly Data Shape: {hourly_df.shape}")
 
         logger.info("\n" + "=" * 60)
         logger.info("All data fetches completed successfully!")
         logger.info("=" * 60)
 
-        return staging_df, baseline_df, hourly_df
+        return staging_df, baseline_df, baseline_30d_df, hourly_df
 
     except Exception as e:
         logger.error(f"Failed to fetch data: {str(e)}")
@@ -317,5 +398,4 @@ def main():
 
 
 if __name__ == "__main__":
-    staging_df, baseline_df, hourly_df = main()
-
+    staging_df, baseline_df, baseline_30d_df, hourly_df = main()
