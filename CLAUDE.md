@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **pattern detection and promotion pipeline** for service behavior anomalies. It analyzes time-series metrics data from ClickHouse to identify and promote patterns (daily seasonality, weekly seasonality, and drift) in service success rates and latency.
+This is a **pattern detection and promotion pipeline** for service behavior anomalies. It analyzes time-series metrics data from ClickHouse to identify and promote patterns (daily seasonality, weekly seasonality, drift, and volume-driven) in service success rates and latency.
 
-The system identifies behavioral patterns in application services, helping detect when services consistently underperform at specific times or experience drift over time.
+The system identifies behavioral patterns in application services, helping detect when services consistently underperform at specific times, experience drift over time, or degrade under high volume.
 
 ## Core Architecture
 
@@ -19,21 +19,23 @@ The system identifies behavioral patterns in application services, helping detec
 
 ### Key Modules
 
-- **`config.py`**: Centralized configuration with thresholds for pattern detection (repeat threshold, volume threshold, drift thresholds, TTL days)
+- **`config.py`**: Centralized configuration with thresholds for pattern detection
 - **`fetch_data.py`**: ClickHouse data fetching layer with functions for staging, baseline, 30-day baseline, and hourly metrics
 - **`daily_weekly.py`**: Core promotion logic for seasonal patterns (daily and weekly)
-- **`drift.py`**: Drift pattern detection logic (drift_up and drift_down)
+- **`drift.py`**: Drift pattern detection logic (drift_up and drift_down) based on recent 24-hour trends
+- **`volume.py`**: Volume-driven pattern detection using correlation analysis between request volume and performance
 - **`run_promotion_pipeline.py`**: Main orchestration script that runs the complete pipeline
 - **`recreate_table.py`**: Utility to drop and recreate the memory table
 
 ### Pattern Types
 
-The system detects four pattern types:
+The system detects five pattern types:
 
 1. **`daily_seasonal`**: Patterns that occur at the same hour every day (e.g., "Daily 14-15")
 2. **`weekly_seasonal`**: Patterns that occur at specific day-hour combinations (e.g., "Mon 14-15")
 3. **`drift_up`**: Recent 24-hour upward trend in metrics
 4. **`drift_down`**: Recent 24-hour downward trend in metrics
+5. **`volume_driven`**: Performance degradation correlated with request volume (pattern_window: "30 Days")
 
 ### Baseline Classification
 
@@ -76,8 +78,9 @@ This will:
 2. Promote daily seasonal patterns
 3. Promote weekly seasonal patterns
 4. Promote drift patterns
-5. Write results to `ai_service_behavior_memory`
-6. Save a backup CSV with timestamp
+5. Promote volume-driven patterns
+6. Combine and write results to `ai_service_behavior_memory`
+7. Save a backup CSV with timestamp
 
 ### Utility Scripts
 
@@ -91,14 +94,11 @@ Recreate the memory table (drops and recreates with correct schema):
 python recreate_table.py
 ```
 
-Test daily/weekly promotion logic only:
+Test individual pattern detection modules:
 ```bash
-python daily_weekly.py
-```
-
-Test drift detection logic only:
-```bash
-python drift.py
+python daily_weekly.py  # Daily/weekly patterns only
+python drift.py         # Drift patterns only
+python volume.py        # Volume-driven patterns only
 ```
 
 ## Critical Implementation Details
@@ -119,6 +119,57 @@ python drift.py
 - Threshold: `repeat_ratio >= REPEAT_THRESHOLD` and `bad_weeks >= MIN_SUPPORT`
 - Uses `week_year` format to avoid year boundary issues
 
+### Drift Detection Logic
+
+**Critical Bug Fix**: Uses **time-based filtering**, not row-based filtering.
+
+```python
+# CORRECT - Time-based (last 24 hours)
+max_date = hourly_subset['ts_hour'].max()
+recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(hours=24)]
+
+# WRONG - Row-based (would break with sparse data)
+recent = hourly_subset.tail(24)  # DON'T DO THIS
+```
+
+**Requirements:**
+- At least 12 hours of data in the last 24 hours
+- Significant deviation compared to baseline chronic delta:
+  - Success rate: `abs(median_delta) >= max(0.3%, 0.25 * baseline_chronic_delta)`
+  - Latency: `abs(median_delta) >= max(0.000001s, 1.5 * baseline_chronic_delta)`
+- Direction consistency: 60% of values going in the same direction
+
+**support_days calculation**: Days between first_seen and last_seen (typically 1 day for 24h drift window)
+
+### Volume-Driven Detection Logic
+
+**Time window**: Last 30 days from each service's own max_date (not global max_date)
+
+**Correlation thresholds:**
+- Success rate: `correlation <= -0.5` (volume up → success down)
+- Latency: `correlation >= 0.5` (volume up → latency up)
+
+**Requirements:**
+- At least 30 hours of data in the last 30 days
+- Sufficient variance in both volume and metrics
+- Must pass volume gate (median volume >= 30% of baseline)
+
+**support_days calculation**: Days between first_seen and last_seen, capped at 30 days
+
+### Per-Service Max Date
+
+**CRITICAL**: All pattern detection uses **per-service max_date**, not global max_date.
+
+```python
+# Get each service's latest data point
+max_date = hourly_subset['ts_hour'].max()
+
+# Then calculate time window from that
+recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(days=30)]
+```
+
+This ensures services with delayed data are analyzed correctly using their own time windows.
+
 ### Volume Gate
 
 All patterns must pass a volume gate:
@@ -136,12 +187,16 @@ abs(window_delta) > DELTA_MULTIPLIER * abs(median_d)
 
 This prevents promoting patterns that are just chronic baseline behavior.
 
-### Drift Detection
+### Delta Precision
 
-Drift patterns require:
-- At least 12 hours of data in the last 24 hours
-- Significant deviation: `>= max(threshold, 2 * baseline_delta)`
-- Direction consistency: 70% of values going in the same direction
+**CRITICAL**: Use 4 decimal places for latency deltas to capture millisecond-scale changes:
+
+```python
+"delta_success": round(delta_success, 2),        # 2 decimals for percentage
+"delta_latency_p90": round(delta_latency, 4),   # 4 decimals for milliseconds
+```
+
+Without 4 decimals, small latency drifts (e.g., 0.0016s) would round to 0.00 and appear as no change.
 
 ## Configuration Tuning
 
@@ -154,6 +209,16 @@ Key thresholds in `config.py`:
 - `DELTA_MULTIPLIER: 1.5` - Multiplier for chronic noise filter
 - `DRIFT_HOURS: 24` - Time window for drift detection
 
+Drift thresholds (tuned for real-world data):
+- Success rate: 0.3% minimum, 0.25x baseline chronic delta
+- Latency: ~0 minimum (0.000001s), 1.5x baseline chronic delta
+- Direction consistency: 60% of values in same direction
+
+Volume-driven thresholds:
+- Success rate correlation: <= -0.5
+- Latency correlation: >= 0.5
+- Minimum data points: 30 hours in 30 days
+
 ## Important Gotchas
 
 1. **Day of Week Format**: The staging data uses ISO format (1=Monday, 7=Sunday), but hourly data uses Pandas format (0=Monday, 6=Sunday). The promotion logic normalizes this.
@@ -161,12 +226,33 @@ Key thresholds in `config.py`:
 2. **Baseline 30D Delta**: Always prefer pre-calculated `delta_median_success` and `delta_median_latency` from `ai_baseline_stats_30d` over calculating deltas on-the-fly.
 
 3. **Time Windows**:
-   - Long-term confidence: Last 30 days from max date
-   - Recency confidence: Last 7 days from max date
-   - Volume gate: Last 30 days from max date
-   - Drift detection: Last 24 hours
+   - Long-term confidence (daily patterns): Last 30 days from service's max_date
+   - Recency confidence (daily patterns): Last 7 days from service's max_date
+   - Volume gate (all patterns): Last 30 days from service's max_date
+   - Drift detection: Last 24 hours from service's max_date
+   - Volume-driven: Last 30 days from service's max_date
 
 4. **ClickHouse Connection**: The connection configuration is duplicated in `fetch_data.py` and `run_promotion_pipeline.py` - keep them in sync.
+
+5. **Diagnostic Queries**: When writing SQL queries to verify pattern detection, always use **per-service max_date** in WHERE clauses, not `now()` or global max_date. Example:
+
+```sql
+-- CORRECT - matches Python logic
+SELECT ...
+FROM service_metrics_hourly_2 AS t1
+WHERE ts_hour >= (
+  SELECT MAX(ts_hour) - INTERVAL 30 DAY
+  FROM service_metrics_hourly_2 AS t2
+  WHERE t2.application_id = t1.application_id
+    AND t2.service = t1.service
+    AND t2.metric = t1.metric
+)
+GROUP BY application_id, service, metric
+
+-- WRONG - uses global time reference
+SELECT ...
+WHERE ts_hour >= now() - INTERVAL 30 DAY
+```
 
 ## Database Schema
 
@@ -174,8 +260,15 @@ The memory table (`ai_service_behavior_memory`) stores these columns:
 - Service identifiers: `application_id`, `service`, `metric`
 - Baseline info: `baseline_state`, `baseline_value`
 - Pattern info: `pattern_type`, `pattern_window`
-- Deltas: `delta_success`, `delta_latency_p90`
+- Deltas: `delta_success`, `delta_latency_p90` (4 decimals for latency)
 - Confidence: `support_days`, `confidence`, `long_term`, `recency`
 - Temporal: `first_seen`, `last_seen`, `detected_at`
 
-Note: `long_term` and `recency` are NULL for weekly and drift patterns (only used for daily patterns).
+**Field semantics:**
+- `support_days`: Days between first_seen and last_seen (not hours!)
+  - Daily patterns: varies based on data
+  - Weekly patterns: varies based on data
+  - Drift patterns: typically 1 (24-hour window)
+  - Volume-driven: 1-30 days (capped at 30)
+- `long_term`, `recency`: Only populated for daily patterns, NULL for others
+- `pattern_window`: Human-readable time window (e.g., "Daily 14-15", "Mon 14-15", "Last 24h", "30 Days")

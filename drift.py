@@ -235,7 +235,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
             "delta_success": round(delta_success, 2),
             "delta_latency_p90": round(delta_latency, 4),  # 4 decimals for millisecond precision
 
-            "support_days": drift_result["data_points"],  # Number of hours with data
+            "support_days": (drift_result["last_seen"] - drift_result["first_seen"]).days + 1,  # Days between first and last seen
             "confidence": drift_result["confidence"],
 
             # For drift patterns, long_term and recency are not applicable
