@@ -20,6 +20,7 @@ from fetch_data import fetch_data_to_dataframe, fetch_baseline_data, fetch_basel
 from daily_weekly import promote_seasonality, get_baseline, median_delta, volume_ok, classify_baseline
 from drift import promote_drift
 from volume import promote_volume
+from sudden import promote_sudden
 
 # Import configuration
 from config import CONFIG
@@ -193,23 +194,36 @@ def run_promotion_pipeline():
         )
         logger.info(f"✓ Volume-driven patterns promoted: {len(volume_promoted_df)} patterns")
 
-        # Step 6: Combine results
+        # Step 6: Promote sudden patterns
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 6: Combining Results")
+        logger.info("STEP 6: Promoting Sudden Drop/Spike Patterns")
         logger.info("=" * 80)
 
-        logger.info("\nCombining daily, weekly, drift, and volume-driven promoted patterns...")
-        promoted_df = pd.concat([daily_promoted_df, weekly_promoted_df, drift_promoted_df, volume_promoted_df], ignore_index=True)
+        logger.info("\nRunning sudden pattern detection logic...")
+        sudden_promoted_df = promote_sudden(
+            baseline_df=baseline_df,
+            baseline_30d_df=baseline_30d_df,
+            hourly_df=hourly_df
+        )
+        logger.info(f"✓ Sudden patterns promoted: {len(sudden_promoted_df)} patterns")
+
+        # Step 7: Combine results
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 7: Combining Results")
+        logger.info("=" * 80)
+
+        logger.info("\nCombining daily, weekly, drift, volume-driven, and sudden promoted patterns...")
+        promoted_df = pd.concat([daily_promoted_df, weekly_promoted_df, drift_promoted_df, volume_promoted_df, sudden_promoted_df], ignore_index=True)
         logger.info(f"✓ Total promoted patterns: {len(promoted_df)} patterns")
 
-        # Step 7: Write to ClickHouse
+        # Step 8: Write to ClickHouse
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 7: Writing to ClickHouse")
+        logger.info("STEP 8: Writing to ClickHouse")
         logger.info("=" * 80)
 
         write_success = write_to_clickhouse(promoted_df)
 
-        # Step 8: Display summary
+        # Step 9: Display summary
         logger.info("\n" + "=" * 80)
         logger.info("PIPELINE SUMMARY")
         logger.info("=" * 80)
@@ -227,6 +241,7 @@ def run_promotion_pipeline():
         print(f"   - Weekly patterns: {len(weekly_promoted_df):,}")
         print(f"   - Drift patterns: {len(drift_promoted_df):,}")
         print(f"   - Volume-driven patterns: {len(volume_promoted_df):,}")
+        print(f"   - Sudden patterns: {len(sudden_promoted_df):,}")
         print(f"   - Total promoted: {len(promoted_df):,}")
         
         if len(promoted_df) > 0:

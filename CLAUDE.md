@@ -12,6 +12,30 @@ The system identifies behavioral patterns in application services, helping detec
 
 ### Data Flow Pipeline
 
+```
+Raw Metrics (service_metrics_hourly_2)
+    ↓
+Materialized Views → ai_detector_staging1 (pattern candidates)
+    ↓
+Baseline Calculation → ai_baseline_view_2 (14-day stats)
+                    → ai_baseline_stats_30d (30-day deltas)
+    ↓
+fetch_data.py → Load all data into DataFrames
+    ↓
+Pattern Detection (in parallel):
+├─ daily_weekly.py  → Daily & Weekly seasonal patterns
+├─ drift.py         → Drift up/down patterns (24h trends)
+├─ volume.py        → Volume-driven patterns (correlation)
+└─ sudden.py        → Sudden drop/spike patterns (current hour)
+    ↓
+Combine & Validate → Volume gate + Chronic noise filter
+    ↓
+Write to ClickHouse → ai_service_behavior_memory
+    ↓
+Backup to CSV → promoted_patterns_YYYYMMDD_HHMMSS.csv
+```
+
+**Key Data Sources:**
 1. **Data Ingestion**: ClickHouse materialized views populate `ai_detector_staging1` with pattern candidates
 2. **Data Fetching**: `fetch_data.py` retrieves staging, baseline, and hourly metrics from ClickHouse
 3. **Pattern Promotion**: Promotion logic validates candidates and filters noise
@@ -24,18 +48,21 @@ The system identifies behavioral patterns in application services, helping detec
 - **`daily_weekly.py`**: Core promotion logic for seasonal patterns (daily and weekly)
 - **`drift.py`**: Drift pattern detection logic (drift_up and drift_down) based on recent 24-hour trends
 - **`volume.py`**: Volume-driven pattern detection using correlation analysis between request volume and performance
+- **`sudden.py`**: Sudden drop/spike pattern detection logic for immediate anomalies
 - **`run_promotion_pipeline.py`**: Main orchestration script that runs the complete pipeline
 - **`recreate_table.py`**: Utility to drop and recreate the memory table
 
 ### Pattern Types
 
-The system detects five pattern types:
+The system detects seven pattern types:
 
 1. **`daily_seasonal`**: Patterns that occur at the same hour every day (e.g., "Daily 14-15")
 2. **`weekly_seasonal`**: Patterns that occur at specific day-hour combinations (e.g., "Mon 14-15")
 3. **`drift_up`**: Recent 24-hour upward trend in metrics
 4. **`drift_down`**: Recent 24-hour downward trend in metrics
 5. **`volume_driven`**: Performance degradation correlated with request volume (pattern_window: "30 Days")
+6. **`sudden_drop`**: Immediate success rate drop >= 5% from baseline (single hour)
+7. **`sudden_spike`**: Immediate latency spike >= 1 second from baseline (single hour)
 
 ### Baseline Classification
 
@@ -79,8 +106,9 @@ This will:
 3. Promote weekly seasonal patterns
 4. Promote drift patterns
 5. Promote volume-driven patterns
-6. Combine and write results to `ai_service_behavior_memory`
-7. Save a backup CSV with timestamp
+6. Promote sudden drop/spike patterns
+7. Combine and write results to `ai_service_behavior_memory`
+8. Save a backup CSV with timestamp
 
 ### Utility Scripts
 
@@ -99,6 +127,7 @@ Test individual pattern detection modules:
 python daily_weekly.py  # Daily/weekly patterns only
 python drift.py         # Drift patterns only
 python volume.py        # Volume-driven patterns only
+python sudden.py        # Sudden drop/spike patterns only
 ```
 
 ## Critical Implementation Details
@@ -155,6 +184,23 @@ recent = hourly_subset.tail(24)  # DON'T DO THIS
 - Must pass volume gate (median volume >= 30% of baseline)
 
 **support_days calculation**: Days between first_seen and last_seen, capped at 30 days
+
+### Sudden Drop/Spike Detection Logic
+
+**Detection method**: Compares the most recent hour to baseline values for immediate anomalies.
+
+**Thresholds:**
+- Sudden drop: Success rate drop >= 5% from baseline
+- Sudden spike: Latency increase >= 1 second from baseline
+
+**Requirements:**
+- Only examines the most recent hour (max timestamp)
+- Confidence is set to 1.0 (high confidence for clear threshold breaches)
+- Must pass volume gate (median volume >= 30% of baseline)
+
+**support_days calculation**: Always 1 day (single-hour events)
+
+**Pattern window format**: Exact timestamp of the sudden event (e.g., "2024-01-15 14:00")
 
 ### Per-Service Max Date
 
@@ -219,6 +265,10 @@ Volume-driven thresholds:
 - Latency correlation: >= 0.5
 - Minimum data points: 30 hours in 30 days
 
+Sudden drop/spike thresholds:
+- Success rate drop: >= 5% from baseline
+- Latency spike: >= 1 second from baseline
+
 ## Important Gotchas
 
 1. **Day of Week Format**: The staging data uses ISO format (1=Monday, 7=Sunday), but hourly data uses Pandas format (0=Monday, 6=Sunday). The promotion logic normalizes this.
@@ -231,6 +281,7 @@ Volume-driven thresholds:
    - Volume gate (all patterns): Last 30 days from service's max_date
    - Drift detection: Last 24 hours from service's max_date
    - Volume-driven: Last 30 days from service's max_date
+   - Sudden drop/spike: Most recent hour only (single timestamp)
 
 4. **ClickHouse Connection**: The connection configuration is duplicated in `fetch_data.py` and `run_promotion_pipeline.py` - keep them in sync.
 
@@ -270,5 +321,86 @@ The memory table (`ai_service_behavior_memory`) stores these columns:
   - Weekly patterns: varies based on data
   - Drift patterns: typically 1 (24-hour window)
   - Volume-driven: 1-30 days (capped at 30)
+  - Sudden patterns: always 1 (single-hour event)
 - `long_term`, `recency`: Only populated for daily patterns, NULL for others
-- `pattern_window`: Human-readable time window (e.g., "Daily 14-15", "Mon 14-15", "Last 24h", "30 Days")
+- `pattern_window`: Human-readable time window (e.g., "Daily 14-15", "Mon 14-15", "Last 24h", "30 Days", "2024-01-15 14:00")
+
+## Debugging and Validation
+
+### Quick ClickHouse Queries
+
+Use curl to query ClickHouse for debugging (connection details in `config.py`):
+
+**Check current hour data vs baseline:**
+```bash
+curl -s 'http://ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com:8123/?user=wm_test&password=Watermelon@123&database=metrics' --data-binary "
+SELECT h.service, h.metric, h.success_rate_p50, b.baseline_value,
+       (b.baseline_value - h.success_rate_p50) as drop
+FROM service_metrics_hourly_2 h
+JOIN ai_baseline_view_2 b USING (application_id, service, metric)
+WHERE h.ts_hour = (SELECT MAX(ts_hour) FROM service_metrics_hourly_2 h2
+                   WHERE h2.application_id = h.application_id
+                   AND h2.service = h.service AND h2.metric = h.metric)
+LIMIT 10 FORMAT PrettyCompact
+"
+```
+
+**Check promoted patterns:**
+```bash
+curl -s 'http://ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com:8123/?user=wm_test&password=Watermelon@123&database=metrics' --data-binary "
+SELECT pattern_type, COUNT(*) as count
+FROM ai_service_behavior_memory
+GROUP BY pattern_type
+FORMAT PrettyCompact
+"
+```
+
+**Find sudden pattern candidates:**
+```bash
+curl -s 'http://ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com:8123/?user=wm_test&password=Watermelon@123&database=metrics' --data-binary "
+SELECT h.service, h.metric,
+       CASE WHEN h.metric = 'success_rate'
+            THEN round(b.baseline_value - h.success_rate_p50, 2)
+            ELSE round(h.p90_latency - b.baseline_value_p90, 4) END as delta
+FROM service_metrics_hourly_2 h
+JOIN ai_baseline_view_2 b USING (application_id, service, metric)
+WHERE h.ts_hour = (SELECT MAX(ts_hour) FROM service_metrics_hourly_2 h2
+                   WHERE h2.application_id = h.application_id
+                   AND h2.service = h.service AND h2.metric = h.metric)
+  AND ((h.metric = 'success_rate' AND (b.baseline_value - h.success_rate_p50) >= 5.0)
+    OR (h.metric = 'latency' AND (h.p90_latency - b.baseline_value_p90) >= 1.0))
+FORMAT PrettyCompact
+"
+```
+
+### Verifying Pattern Detection
+
+After running the pipeline, verify results match expectations:
+
+1. **Check pattern counts**: Compare detected patterns against SQL queries
+2. **Verify deltas**: Ensure delta values match between Python output and ClickHouse
+3. **Volume gate validation**: Confirm patterns passed the 30% volume threshold
+4. **Timestamp alignment**: For sudden patterns, verify pattern_window matches actual event time
+
+### Common Issues and Solutions
+
+**No patterns detected:**
+- Check if services have sufficient data (MIN_SUPPORT days/weeks)
+- Verify volume gate is being met (30% of baseline median)
+- Review thresholds in `config.py` - may be too strict
+- Check if baseline data exists for services in question
+
+**Patterns detected in SQL but not in Python:**
+- Verify Python logic uses per-service max_date (not global max_date)
+- Check if chronic noise filter is filtering out the pattern
+- Ensure volume gate calculation uses same 30-day window
+
+**Delta values don't match:**
+- Latency: Must use 4 decimal precision (round to 0.0001s)
+- Success: Use 2 decimal precision (round to 0.01%)
+- Verify baseline source (14-day vs 30-day baseline tables)
+
+**Sudden patterns not triggering:**
+- Verify thresholds: 5% for success drop, 1s for latency spike
+- Check that comparing against correct baseline table (ai_baseline_view_2)
+- Ensure examining most recent hour only (per-service max timestamp)
