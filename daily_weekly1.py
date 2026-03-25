@@ -13,9 +13,9 @@ from config import CONFIG
 
 
 def classify_baseline(breach_ratio):
-    if breach_ratio >= 0.6:
+    if breach_ratio >= CONFIG["BASELINE_CHRONIC_THRESHOLD"]:
         return "CHRONIC"
-    elif breach_ratio >= 0.3:
+    elif breach_ratio >= CONFIG["BASELINE_AT_RISK_THRESHOLD"]:
         return "AT_RISK"
     return "HEALTHY"
 
@@ -25,28 +25,31 @@ def classify_baseline(breach_ratio):
 ## Common Helpers
 
 
-def get_baseline(baseline_df, app, svc, metric):
+def get_baseline(baseline_df, proj, app, svc, metric):
     row = baseline_df[
+        (baseline_df.project_id == proj) &
         (baseline_df.application_id == app) &
         (baseline_df.service == svc) &
         (baseline_df.metric == metric)
     ]
     return None if row.empty else row.iloc[0]
 
-def get_baseline_30d(baseline_30d_df, app, svc, metric):
+def get_baseline_30d(baseline_30d_df, proj, app, svc, metric):
     """
     Get pre-calculated delta values from 30-day baseline stats
     Returns delta_median_success and delta_median_latency
     """
     row = baseline_30d_df[
+        (baseline_30d_df.project_id == proj) &
         (baseline_30d_df.application_id == app) &
         (baseline_30d_df.service == svc) &
         (baseline_30d_df.metric == metric)
     ]
     return None if row.empty else row.iloc[0]
 
-def median_delta(hourly_df, app, svc, metric, baseline_value):
+def median_delta(hourly_df, proj, app, svc, metric, baseline_value):
     subset = hourly_df[
+        (hourly_df.project_id == proj) &
         (hourly_df.application_id == app) &
         (hourly_df.service == svc) &
         (hourly_df.metric == metric)
@@ -74,11 +77,16 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
     """
     promoted = []
 
-    # Normalize day_of_week to 0-6 format (Monday=0, Sunday=6)
+    # Normalize day_of_week to 0-6 format (Monday=0, Sunday=6) in BOTH staging_df and hourly_df
     staging_df = staging_df.copy()
     if staging_df['day_of_week'].max() == 7:
         # ISO format detected (1-7), convert to Pandas format (0-6)
         staging_df['day_of_week'] = (staging_df['day_of_week'] - 1) % 7
+
+    hourly_df = hourly_df.copy()
+    if 'day_of_week' in hourly_df.columns and hourly_df['day_of_week'].max() == 7:
+        # ISO format detected (1-7), convert to Pandas format (0-6)
+        hourly_df['day_of_week'] = (hourly_df['day_of_week'] - 1) % 7
 
     # For daily patterns, group only by hour (not day_of_week) to get one row per pattern
     # For weekly patterns, keep the original grouping
@@ -86,23 +94,27 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         grouped = staging_df[
             staging_df.pattern_type == mode
         ].groupby(
-            ["application_id", "service", "metric", "hour"]
+            ["project_id", "application_id", "service", "metric", "hour"]
         )
     else:
         grouped = staging_df[
             staging_df.pattern_type == mode
         ].groupby(
-            ["application_id", "service", "metric", "day_of_week", "hour"]
+            ["project_id", "application_id", "service", "metric", "day_of_week", "hour"]
         )
 
     for group_key, group in grouped:
         # Unpack group_key based on mode
         if mode == 'daily_candidate':
-            app, svc, metric, hour = group_key
+            proj, app, svc, metric, hour = group_key
             dow = None  # Not used for daily patterns
         else:
-            app, svc, metric, dow, hour = group_key
-        base = get_baseline(baseline_df, app, svc, metric)
+            proj, app, svc, metric, dow, hour = group_key
+
+        # Extract service_id from the group (should be consistent across all rows)
+        service_id = group['service_id'].iloc[0] if 'service_id' in group.columns else None
+
+        base = get_baseline(baseline_df, proj, app, svc, metric)
         if base is None:
             continue
 
@@ -110,9 +122,9 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         median_volume = float(base.median_hour_volumne)
         breach_ratio = float(base.breach_ratio)
 
-        # --- FILTER OUT HEALTHY BASELINE FOR DAILY PATTERNS ---
+        # --- FILTER OUT HEALTHY BASELINE ---
         baseline_state = classify_baseline(breach_ratio)
-        if mode == 'daily_candidate' and baseline_state == "HEALTHY":
+        if baseline_state == "HEALTHY":
             continue
 
         # --- CALCULATE LONG_TERM AND RECENCY CONFIDENCE (DAILY PATTERNS ONLY) ---
@@ -124,6 +136,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         if mode == 'daily_candidate':
             # Filter hourly_df for this specific app, service, metric, and hour
             hourly_subset = hourly_df[
+                (hourly_df.project_id == proj) &
                 (hourly_df.application_id == app) &
                 (hourly_df.service == svc) &
                 (hourly_df.metric == metric) &
@@ -133,8 +146,8 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             # Get the maximum date from hourly_df
             max_date = hourly_subset.ts_hour.max()
 
-            # LONG TERM CONFIDENCE: last 30 days from max date
-            long_term_start = max_date - pd.Timedelta(days=29)  # 29 days before + current day = 30 days
+            # LONG TERM CONFIDENCE: last N days from max date
+            long_term_start = max_date - pd.Timedelta(days=CONFIG["DAILY_LONG_TERM_DAYS"] - 1)
 
             # Count total days from hourly_df where total_windows > 0 at this hour in past 30 days
             long_term_hourly = hourly_subset[
@@ -158,8 +171,8 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             else:
                 long_term_confidence = None
 
-            # RECENCY CONFIDENCE: last 7 days from max date
-            recency_start = max_date - pd.Timedelta(days=6)  # 6 days before + current day = 7 days
+            # RECENCY CONFIDENCE: last N days from max date
+            recency_start = max_date - pd.Timedelta(days=CONFIG["DAILY_RECENCY_DAYS"] - 1)
 
             # Count total days from hourly_df where total_windows > 0 at this hour in past 7 days
             recency_hourly = hourly_subset[
@@ -188,7 +201,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             repeat_ratio = long_term_bad_days / max(1, long_term_total_days) if long_term_total_days > 0 else 0
 
             # Check thresholds for daily patterns - use long_term_confidence for filtering (more lenient)
-            if long_term_confidence is None or long_term_confidence < 0.4:
+            if long_term_confidence is None or long_term_confidence < CONFIG["DAILY_LONG_TERM_CONFIDENCE_THRESHOLD"]:
                 continue
 
             if long_term_bad_days < CONFIG["MIN_SUPPORT"]:
@@ -197,6 +210,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             # WEEKLY PATTERNS: use week-based logic with ALL historical data
             # Filter hourly_df for this specific app, service, metric, day_of_week, and hour
             hourly_subset = hourly_df[
+                (hourly_df.project_id == proj) &
                 (hourly_df.application_id == app) &
                 (hourly_df.service == svc) &
                 (hourly_df.metric == metric) &
@@ -208,20 +222,14 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             max_date = hourly_subset.ts_hour.max()
 
             # Count total weeks from hourly_df where total_windows > 0 at this day_of_week and hour
-            # Use year-week format to avoid year boundary issues
-            hourly_subset['week_year'] = (
-                hourly_subset.ts_hour.dt.isocalendar().year.astype(str) + '-W' +
-                hourly_subset.ts_hour.dt.isocalendar().week.astype(str).str.zfill(2)
-            )
+            # Use ISO week format to properly handle year boundary issues (%G = ISO year, %V = ISO week)
+            hourly_subset['week_year'] = hourly_subset.ts_hour.dt.strftime('%G-W%V')
             valid_weeks = set(hourly_subset[hourly_subset.total_windows > 0]['week_year'])
             total_weeks = len(valid_weeks)
 
             # Count bad weeks from staging data (only count if week exists in valid_weeks)
             group_copy = group.copy()
-            group_copy['week_year'] = (
-                group_copy.ts_hour.dt.isocalendar().year.astype(str) + '-W' +
-                group_copy.ts_hour.dt.isocalendar().week.astype(str).str.zfill(2)
-            )
+            group_copy['week_year'] = group_copy.ts_hour.dt.strftime('%G-W%V')
             bad_weeks_set = set(group_copy[group_copy.bad_ratio >= CONFIG["BAD_RATIO_THRESHOLD"]]['week_year'])
             bad_weeks = len(bad_weeks_set & valid_weeks)  # Intersection ensures bad_weeks <= total_weeks
 
@@ -229,38 +237,64 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             repeat_ratio = bad_weeks / max(1, total_weeks) if total_weeks > 0 else 0
 
             # Check thresholds for weekly patterns
-            if repeat_ratio < CONFIG["REPEAT_THRESHOLD"] or bad_weeks < CONFIG["MIN_SUPPORT"]:
+            if repeat_ratio < CONFIG["WEEKLY_REPEAT_THRESHOLD"] or bad_weeks < CONFIG["MIN_SUPPORT"]:
                 continue
 
         # --- VOLUME GATE ---
-        # Filter group to past 30 days for volume calculation (both daily and weekly)
+        # Filter to past N days for volume calculation
         max_date_for_group = max_date  # Use the already-calculated max_date
+        gate_days = CONFIG["DAILY_VOLUME_GATE_DAYS"] if mode == 'daily_candidate' else CONFIG["WEEKLY_VOLUME_GATE_DAYS"]
+        volume_window_start = max_date_for_group - pd.Timedelta(days=gate_days - 1)
 
-        volume_window_start = max_date_for_group - pd.Timedelta(days=29)  # 30 days
+        # For DAILY patterns: use staging data (group) for volume calculation
+        # For WEEKLY patterns: use hourly data (hourly_subset) for accurate volume
+        if mode == 'daily_candidate':
+            group_30d_for_volume = group[
+                (group.ts_hour >= volume_window_start) &
+                (group.ts_hour <= max_date_for_group)
+            ]
+            window_volume = group_30d_for_volume.total_requests.median()
+        else:
+            # Weekly patterns: use all hourly data for this day_of_week + hour combination
+            hourly_30d = hourly_subset[
+                (hourly_subset.ts_hour >= volume_window_start) &
+                (hourly_subset.ts_hour <= max_date_for_group)
+            ]
+            window_volume = hourly_30d.total_requests.median()
+            # Also create group_30d_for_volume for delta calculation below
+            group_30d_for_volume = group[
+                (group.ts_hour >= volume_window_start) &
+                (group.ts_hour <= max_date_for_group)
+            ]
 
-        group_30d_for_volume = group[
-            (group.ts_hour >= volume_window_start) &
-            (group.ts_hour <= max_date_for_group)
-        ]
-
-        window_volume = group_30d_for_volume.total_requests.median()
         if not volume_ok(window_volume, median_volume):
             continue
 
+        # If staging data falls outside the 30d window, fall back to full group
+        if len(group_30d_for_volume) == 0:
+            group_30d_for_volume = group
+
         # --- GET PRE-CALCULATED DELTA VALUES FROM 30D BASELINE ---
-        baseline_30d = get_baseline_30d(baseline_30d_df, app, svc, metric)
+        baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
         if baseline_30d is not None and pd.notna(baseline_30d.delta_median_success):
             # Use pre-calculated chronic delta
             median_d = float(baseline_30d.delta_median_success)
-            delta_latency = float(baseline_30d.delta_median_latency) if pd.notna(baseline_30d.delta_median_latency) else 0.0
+            chronic_delta_latency = float(baseline_30d.delta_median_latency) if pd.notna(baseline_30d.delta_median_latency) else 0.0
         else:
             # Fallback to calculated chronic delta
-            median_d = median_delta(hourly_df, app, svc, metric, baseline_value)
-            delta_latency = group_30d_for_volume.delta_latency_p90.median()
+            median_d = median_delta(hourly_df, proj, app, svc, metric, baseline_value)
+            chronic_delta_latency = 0.0
 
-        # Pattern-specific delta (from past 30 days data)
+        # Pattern-specific deltas (from past 30 days data)
         window_delta = group_30d_for_volume.delta_success.median()
+
+        # For WEEKLY patterns: always use pattern-specific latency delta from staging data
+        # For DAILY patterns: use chronic baseline delta (existing behavior)
+        if mode == 'weekly_candidate':
+            delta_latency = group_30d_for_volume.delta_latency_p90.median()
+        else:
+            delta_latency = chronic_delta_latency
 
         # --- CHRONIC NOISE FILTER ---
         if abs(window_delta) <= CONFIG["DELTA_MULTIPLIER"] * abs(median_d):
@@ -283,7 +317,9 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         last_seen = group_30d_for_volume.ts_hour.max()
 
         promoted.append({
+            "project_id": proj,
             "application_id": app,
+            "service_id": service_id,
             "service": svc,
             "metric": metric,
 
@@ -309,3 +345,126 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         })
 
     return pd.DataFrame(promoted)
+
+
+if __name__ == "__main__":
+    """
+    Standalone mode - fetches data, runs daily/weekly pattern detection, and writes to ClickHouse
+    """
+    import logging
+    import clickhouse_connect
+    from fetch_data import main as fetch_all_data
+
+    # ClickHouse connection configuration
+    CLICKHOUSE_CONFIG = {
+        'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
+        'port': 8123,
+        'database': 'metrics',
+        'username': 'wm_test',
+        'password': 'Watermelon@123'
+    }
+    TARGET_TABLE = 'ai_service_behavior_memory'
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    logger.info("=" * 80)
+    logger.info("DAILY/WEEKLY PATTERN DETECTION - STANDALONE MODE")
+    logger.info("=" * 80)
+
+    # Fetch all required data using fetch_data.py main function
+    logger.info("\nFetching all data from ClickHouse...")
+    staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
+
+    logger.info("\n✓ All data loaded successfully")
+    logger.info(f"  - Staging: {staging_df.shape[0]} rows")
+    logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
+    logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
+    logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
+
+    # Run daily pattern detection
+    logger.info("\n" + "=" * 80)
+    logger.info("Running DAILY pattern detection...")
+    logger.info("=" * 80)
+
+    daily_df = promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode="daily_candidate")
+
+    logger.info(f"\n✓ Daily patterns detected: {len(daily_df)}")
+
+    # Run weekly pattern detection
+    logger.info("\n" + "=" * 80)
+    logger.info("Running WEEKLY pattern detection...")
+    logger.info("=" * 80)
+
+    weekly_df = promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode="weekly_candidate")
+
+    logger.info(f"\n✓ Weekly patterns detected: {len(weekly_df)}")
+
+    # Combine results
+    import pandas as pd
+    combined_df = pd.concat([daily_df, weekly_df], ignore_index=True)
+
+    logger.info("\n" + "=" * 80)
+    logger.info("RESULTS")
+    logger.info("=" * 80)
+
+    print(f"\n✓ Total patterns detected: {len(combined_df)}")
+    print(f"  - Daily patterns: {len(daily_df)}")
+    print(f"  - Weekly patterns: {len(weekly_df)}")
+
+    if len(combined_df) > 0:
+        print(f"\nPattern breakdown:")
+        print(combined_df['pattern_type'].value_counts())
+
+        print(f"\n\nFirst 10 patterns:")
+        print(combined_df.head(10).to_string())
+
+        # Save to CSV backup
+        output_file = f"daily_weekly_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        combined_df.to_csv(output_file, index=False)
+        print(f"\n💾 Backup CSV saved to: {output_file}")
+
+        # Write to ClickHouse
+        logger.info("\n" + "=" * 80)
+        logger.info("Writing to ClickHouse")
+        logger.info("=" * 80)
+
+        try:
+            logger.info(f"\nConnecting to ClickHouse at {CLICKHOUSE_CONFIG['host']}:{CLICKHOUSE_CONFIG['port']}...")
+            client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_CONFIG['host'],
+                port=CLICKHOUSE_CONFIG['port'],
+                database=CLICKHOUSE_CONFIG['database'],
+                username=CLICKHOUSE_CONFIG['username'],
+                password=CLICKHOUSE_CONFIG['password']
+            )
+
+            version = client.command('SELECT version()')
+            logger.info(f"✓ Connected to ClickHouse version: {version}")
+
+            logger.info(f"\nInserting {len(combined_df)} rows into {TARGET_TABLE}...")
+            client.insert_df(TARGET_TABLE, combined_df)
+
+            logger.info(f"✓ Successfully wrote {len(combined_df)} patterns to {TARGET_TABLE}")
+
+            # Verify
+            count_query = f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type IN ('daily_seasonal', 'weekly_seasonal')"
+            total_count = client.command(count_query)
+            logger.info(f"✓ Verified: Total daily/weekly patterns in table: {total_count}")
+
+            client.close()
+            logger.info("✓ Connection closed")
+
+            print(f"\n✅ SUCCESS: {len(combined_df)} daily/weekly patterns written to {TARGET_TABLE}")
+
+        except Exception as e:
+            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            raise
+
+    else:
+        print("\n⚠️  No daily/weekly patterns detected with current thresholds")

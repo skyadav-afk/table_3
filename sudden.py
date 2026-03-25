@@ -11,8 +11,9 @@ from config import CONFIG
 
 ## Common Helpers (reused from drift.py and volume.py)
 
-def get_baseline(baseline_df, app, svc, metric):
+def get_baseline(baseline_df, proj, app, svc, metric):
     row = baseline_df[
+        (baseline_df.project_id == proj) &
         (baseline_df.application_id == app) &
         (baseline_df.service == svc) &
         (baseline_df.metric == metric)
@@ -20,12 +21,13 @@ def get_baseline(baseline_df, app, svc, metric):
     return None if row.empty else row.iloc[0]
 
 
-def get_baseline_30d(baseline_30d_df, app, svc, metric):
+def get_baseline_30d(baseline_30d_df, proj, app, svc, metric):
     """
     Get pre-calculated delta values from 30-day baseline stats
     Returns delta_median_success and delta_median_latency
     """
     row = baseline_30d_df[
+        (baseline_30d_df.project_id == proj) &
         (baseline_30d_df.application_id == app) &
         (baseline_30d_df.service == svc) &
         (baseline_30d_df.metric == metric)
@@ -38,9 +40,9 @@ def volume_ok(window_volume, median_volume):
 
 
 def classify_baseline(breach_ratio):
-    if breach_ratio >= 0.6:
+    if breach_ratio >= CONFIG["BASELINE_CHRONIC_THRESHOLD"]:
         return "CHRONIC"
-    elif breach_ratio >= 0.3:
+    elif breach_ratio >= CONFIG["BASELINE_AT_RISK_THRESHOLD"]:
         return "AT_RISK"
     return "HEALTHY"
 
@@ -52,7 +54,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
     Detect sudden drop/spike pattern from recent hourly data
 
     Args:
-        hourly_subset: Hourly data filtered for specific app/service/metric
+        hourly_subset: Hourly data filtered for specific app/service/metric at global max hour
         baseline_row: Baseline stats from ai_baseline_view_2
 
     Returns:
@@ -61,14 +63,11 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
     import logging
     logger = logging.getLogger(__name__)
 
-    # Get the most recent hour (use max timestamp to get the latest data point)
-    max_date = hourly_subset['ts_hour'].max()
-    latest_hour = hourly_subset[hourly_subset['ts_hour'] == max_date]
-
-    if latest_hour.empty:
+    # hourly_subset is already filtered to global max hour, just get the first row
+    if hourly_subset.empty:
         return None
 
-    latest = latest_hour.iloc[0]
+    latest = hourly_subset.iloc[0]
 
     # Get baseline values based on metric type
     if baseline_row["metric"] == "success_rate":
@@ -86,7 +85,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
                 "delta_success": -drop,  # Negative because it's a drop
                 "delta_latency": 0.0,
                 "confidence": 1.0,
-                "first_seen": latest["ts_hour"],
+                "first_seen": latest["ts_hour"] - pd.Timedelta(hours=1),
                 "last_seen": latest["ts_hour"],
                 "data_points": 1
             }
@@ -104,7 +103,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
                 "delta_success": 0.0,
                 "delta_latency": spike,
                 "confidence": 1.0,
-                "first_seen": latest["ts_hour"],
+                "first_seen": latest["ts_hour"] - pd.Timedelta(hours=1),
                 "last_seen": latest["ts_hour"],
                 "data_points": 1
             }
@@ -129,11 +128,22 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
 
     promoted = []
 
-    # Group by application_id, service, metric
-    grouped = hourly_df.groupby(["application_id", "service", "metric"])
+    # Get GLOBAL maximum hour (the most recent hour across ALL data)
+    global_max_hour = hourly_df['ts_hour'].max()
+    logger.info(f"Global maximum hour for sudden pattern detection: {global_max_hour}")
 
-    for (app, svc, metric), group in grouped:
-        base = get_baseline(baseline_df, app, svc, metric)
+    # Filter hourly data to only the global maximum hour
+    latest_hour_df = hourly_df[hourly_df['ts_hour'] == global_max_hour]
+    logger.info(f"Services with data at global max hour: {len(latest_hour_df)}")
+
+    # Group by project_id, application_id, service, metric
+    grouped = latest_hour_df.groupby(["project_id", "application_id", "service", "metric"])
+
+    for (proj, app, svc, metric), group in grouped:
+        # Extract service_id from the group (should be consistent across all rows)
+        service_id = group['service_id'].iloc[0] if 'service_id' in group.columns else None
+
+        base = get_baseline(baseline_df, proj, app, svc, metric)
         if base is None:
             continue
 
@@ -143,21 +153,15 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
 
         baseline_state = classify_baseline(breach_ratio)
 
-        # Detect sudden pattern (only looks at most recent hour)
+        # Detect sudden pattern (group is already filtered to global max hour)
         sudden_result = detect_sudden_pattern(group, base)
 
         if sudden_result is None:
             continue
 
         # --- VOLUME GATE ---
-        # Check volume from the latest hour
-        max_date = group.ts_hour.max()
-        latest_hour = group[group.ts_hour == max_date]
-
-        if latest_hour.empty:
-            continue
-
-        window_volume = float(latest_hour.iloc[0].total_requests)
+        # Check volume from the latest hour (group is already at global max hour)
+        window_volume = float(group.iloc[0].total_requests)
         if not volume_ok(window_volume, median_volume):
             continue
 
@@ -170,7 +174,9 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
         pattern_window = f"{pattern_hour.strftime('%Y-%m-%d %H:00')}"
 
         promoted.append({
+            "project_id": proj,
             "application_id": app,
+            "service_id": service_id,
             "service": svc,
             "metric": metric,
 
@@ -200,10 +206,21 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
 
 if __name__ == "__main__":
     """
-    Standalone test mode - fetches data and runs sudden pattern detection
+    Standalone mode - fetches data, runs sudden pattern detection, and writes to ClickHouse
     """
     import logging
-    from fetch_data import fetch_baseline_data, fetch_baseline_30d_data, fetch_hourly_data
+    import clickhouse_connect
+    from fetch_data import main as fetch_all_data
+
+    # ClickHouse connection configuration
+    CLICKHOUSE_CONFIG = {
+        'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
+        'port': 8123,
+        'database': 'metrics',
+        'username': 'wm_test',
+        'password': 'Watermelon@123'
+    }
+    TARGET_TABLE = 'ai_service_behavior_memory'
 
     # Configure logging
     logging.basicConfig(
@@ -213,21 +230,17 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     logger.info("=" * 80)
-    logger.info("SUDDEN DROP/SPIKE PATTERN DETECTION - STANDALONE TEST")
+    logger.info("SUDDEN DROP/SPIKE PATTERN DETECTION - STANDALONE MODE")
     logger.info("=" * 80)
 
-    # Fetch required data
-    logger.info("\n[1/3] Fetching baseline data...")
-    baseline_df = fetch_baseline_data()
-    logger.info(f"✓ Baseline data loaded: {baseline_df.shape[0]} rows")
+    # Fetch all required data using fetch_data.py main function
+    logger.info("\nFetching all data from ClickHouse...")
+    staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
-    logger.info("\n[2/3] Fetching 30-day baseline data...")
-    baseline_30d_df = fetch_baseline_30d_data()
-    logger.info(f"✓ 30-day baseline data loaded: {baseline_30d_df.shape[0]} rows")
-
-    logger.info("\n[3/3] Fetching hourly data...")
-    hourly_df = fetch_hourly_data()
-    logger.info(f"✓ Hourly data loaded: {hourly_df.shape[0]} rows")
+    logger.info("\n✓ All data loaded successfully")
+    logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
+    logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
+    logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
     # Run sudden pattern detection
     logger.info("\n" + "=" * 80)
@@ -249,10 +262,49 @@ if __name__ == "__main__":
         print(f"\n\nFirst 10 sudden patterns:")
         print(sudden_df.head(10).to_string())
 
-        # Save to CSV
-        output_file = "sudden_patterns_test.csv"
+        # Save to CSV backup
+        output_file = f"sudden_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         sudden_df.to_csv(output_file, index=False)
-        print(f"\n💾 Results saved to: {output_file}")
+        print(f"\n💾 Backup CSV saved to: {output_file}")
+
+        # Write to ClickHouse
+        logger.info("\n" + "=" * 80)
+        logger.info("Writing to ClickHouse")
+        logger.info("=" * 80)
+
+        try:
+            logger.info(f"\nConnecting to ClickHouse at {CLICKHOUSE_CONFIG['host']}:{CLICKHOUSE_CONFIG['port']}...")
+            client = clickhouse_connect.get_client(
+                host=CLICKHOUSE_CONFIG['host'],
+                port=CLICKHOUSE_CONFIG['port'],
+                database=CLICKHOUSE_CONFIG['database'],
+                username=CLICKHOUSE_CONFIG['username'],
+                password=CLICKHOUSE_CONFIG['password']
+            )
+
+            version = client.command('SELECT version()')
+            logger.info(f"✓ Connected to ClickHouse version: {version}")
+
+            logger.info(f"\nInserting {len(sudden_df)} rows into {TARGET_TABLE}...")
+            client.insert_df(TARGET_TABLE, sudden_df)
+
+            logger.info(f"✓ Successfully wrote {len(sudden_df)} sudden patterns to {TARGET_TABLE}")
+
+            # Verify
+            count_query = f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type IN ('sudden_drop', 'sudden_spike')"
+            total_count = client.command(count_query)
+            logger.info(f"✓ Verified: Total sudden patterns in table: {total_count}")
+
+            client.close()
+            logger.info("✓ Connection closed")
+
+            print(f"\n✅ SUCCESS: {len(sudden_df)} sudden patterns written to {TARGET_TABLE}")
+
+        except Exception as e:
+            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            raise
+
     else:
         print("\n⚠️  No sudden patterns detected with current thresholds")
         print(f"   - Success drop threshold: >= {CONFIG['SUDDEN_SUCCESS_DROP']}%")

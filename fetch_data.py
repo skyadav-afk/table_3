@@ -26,7 +26,8 @@ CLICKHOUSE_CONFIG = {
 TABLE_NAME = 'ai_detector_staging1'
 BASELINE_VIEW = 'ai_baseline_view_2'
 BASELINE_VIEW_30D = 'ai_baseline_stats_30d'
-HOURLY_TABLE = 'service_metrics_hourly_2'  # Will try this first, fallback to ai_service_features_hourly
+HOURLY_TABLE = 'ai_service_features_hourly'  # Will try this first, fallback to ai_service_features_hourly
+METRICS_5M_TABLE = 'ai_metrics_5m_v2'  # 5-minute metrics table for volume.py
 
 
 def fetch_data_to_dataframe():
@@ -52,7 +53,7 @@ def fetch_data_to_dataframe():
         version = client.command('SELECT version()')
         logger.info(f"Successfully connected to ClickHouse version: {version}")
 
-        # Build query - fetch all rows (no limit)
+        # Build query - fetch all rows (no limit) including service_id
         query = f"SELECT * FROM {TABLE_NAME}"
         logger.info(f"Executing query: {query}")
 
@@ -103,6 +104,7 @@ def fetch_baseline_data():
         # Build query for baseline data
         query = f"""
         SELECT
+            project_id,
             application_id,
             service,
             metric,
@@ -220,10 +222,12 @@ def fetch_hourly_data():
         if not table_to_use:
             raise Exception("Neither service_metrics_hourly_2 nor ai_service_features_hourly table found")
 
-        # Build query for hourly data
+        # Build query for hourly data - include service_id
         query = f"""
         SELECT
+            project_id,
             application_id,
+            service_id,
             service,
             metric,
             ts_hour,
@@ -231,6 +235,8 @@ def fetch_hourly_data():
             p90_latency,
             total_requests,
             total_windows,
+            bad_windows,
+            breach_ratio,
             hour,
             day_of_week
         FROM {table_to_use}
@@ -253,6 +259,102 @@ def fetch_hourly_data():
 
     except Exception as e:
         logger.error(f"Error fetching hourly data: {str(e)}")
+        raise
+
+
+def fetch_5m_data():
+    """
+    Connect to ClickHouse and fetch 5-minute metrics data from ai_metrics_5m_v2
+    This data is used specifically for volume.py pattern detection
+
+    Returns:
+        pandas.DataFrame: DataFrame containing 5-minute metrics with columns:
+                         application_id, service, ts (timestamp),
+                         success_rate, p90_latency, total_count,
+                         day_of_week, hour, minute_bucket
+
+    Note: The table ai_metrics_5m_v2 does not have a 'metric' column.
+          We need to create separate rows for success_rate and latency metrics.
+    """
+    try:
+        logger.info("Connecting to ClickHouse server for 5-minute metrics data...")
+
+        # Create ClickHouse client using HTTP interface
+        client = clickhouse_connect.get_client(
+            host=CLICKHOUSE_CONFIG['host'],
+            port=CLICKHOUSE_CONFIG['port'],
+            database=CLICKHOUSE_CONFIG['database'],
+            username=CLICKHOUSE_CONFIG['username'],
+            password=CLICKHOUSE_CONFIG['password']
+        )
+
+        # Test connection
+        version = client.command('SELECT version()')
+        logger.info(f"Successfully connected to ClickHouse version: {version}")
+
+        # Build query for 5-minute metrics data - include service_id if available
+        # Note: ai_metrics_5m_v2 has 'ts' instead of 'ts_hour', and no 'metric' column
+        # Try to include service_id, but handle gracefully if it doesn't exist
+        try:
+            # First check if service_id column exists
+            check_query = f"SELECT * FROM {METRICS_5M_TABLE} LIMIT 1"
+            test_df = client.query_df(check_query)
+            has_service_id = 'service_id' in test_df.columns
+        except Exception:
+            has_service_id = False
+
+        if has_service_id:
+            query = f"""
+            SELECT
+                project_id,
+                application_id,
+                service_id,
+                service,
+                ts,
+                success_rate,
+                p90_latency,
+                total_count,
+                day_of_week,
+                hour,
+                minute_bucket
+            FROM {METRICS_5M_TABLE}
+            """
+        else:
+            query = f"""
+            SELECT
+                project_id,
+                application_id,
+                service,
+                ts,
+                success_rate,
+                p90_latency,
+                total_count,
+                day_of_week,
+                hour,
+                minute_bucket
+            FROM {METRICS_5M_TABLE}
+            """
+        logger.info(f"Executing query on {METRICS_5M_TABLE}... (service_id: {has_service_id})")
+
+        # Execute query and get data as pandas DataFrame
+        df = client.query_df(query)
+
+        logger.info(f"Query executed successfully. Fetched {len(df)} rows with {len(df.columns)} columns")
+        logger.info(f"Columns: {', '.join(df.columns.tolist())}")
+
+        # Rename 'ts' to 'ts_hour' for consistency with other data sources
+        df = df.rename(columns={'ts': 'ts_hour'})
+
+        logger.info(f"5-Minute Metrics DataFrame created successfully with shape: {df.shape}")
+
+        # Close connection
+        client.close()
+        logger.info("Connection closed")
+
+        return df
+
+    except Exception as e:
+        logger.error(f"Error fetching 5-minute metrics data: {str(e)}")
         raise
 
 
@@ -377,6 +479,35 @@ def main():
         print(f"\n✓ Hourly DataFrame Info:")
         hourly_df.info()
 
+        # Fetch 5-minute metrics data
+        logger.info("\n" + "=" * 60)
+        logger.info("TASK 5: Fetching 5-Minute Metrics Data from ai_metrics_5m_v2")
+        logger.info("=" * 60)
+
+        metrics_5m_df = fetch_5m_data()
+
+        # Print 5-minute metrics DataFrame information
+        logger.info("\n" + "=" * 60)
+        logger.info("5-MINUTE METRICS DATA RESULTS")
+        logger.info("=" * 60)
+
+        print(f"\n✓ 5-Minute Metrics DataFrame Shape: {metrics_5m_df.shape}")
+        print(f"  - Rows: {metrics_5m_df.shape[0]}")
+        print(f"  - Columns: {metrics_5m_df.shape[1]}")
+
+        print(f"\n✓ 5-Minute Metrics Column Names:")
+        for i, col in enumerate(metrics_5m_df.columns, 1):
+            print(f"  {i}. {col}")
+
+        print(f"\n✓ 5-Minute Metrics Data Types:")
+        print(metrics_5m_df.dtypes)
+
+        print(f"\n✓ 5-Minute Metrics First 5 Rows:")
+        print(metrics_5m_df.head())
+
+        print(f"\n✓ 5-Minute Metrics DataFrame Info:")
+        metrics_5m_df.info()
+
         # Summary
         logger.info("\n" + "=" * 60)
         logger.info("SUMMARY")
@@ -385,12 +516,13 @@ def main():
         print(f"✓ Baseline Data Shape: {baseline_df.shape}")
         print(f"✓ 30-Day Baseline Data Shape: {baseline_30d_df.shape}")
         print(f"✓ Hourly Data Shape: {hourly_df.shape}")
+        print(f"✓ 5-Minute Metrics Data Shape: {metrics_5m_df.shape}")
 
         logger.info("\n" + "=" * 60)
         logger.info("All data fetches completed successfully!")
         logger.info("=" * 60)
 
-        return staging_df, baseline_df, baseline_30d_df, hourly_df
+        return staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df
 
     except Exception as e:
         logger.error(f"Failed to fetch data: {str(e)}")
@@ -398,4 +530,4 @@ def main():
 
 
 if __name__ == "__main__":
-    staging_df, baseline_df, baseline_30d_df, hourly_df = main()
+    staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = main()

@@ -1,9 +1,11 @@
 """
-Drop and recreate ai_service_behavior_memory table with ONLY the required columns
+Create ai_probability table in ClickHouse with the specified schema and sample data.
 """
 
 import clickhouse_connect
 import logging
+from datetime import datetime
+
 
 # Configure logging
 logging.basicConfig(
@@ -22,55 +24,32 @@ CLICKHOUSE_CONFIG = {
 }
 
 # Drop table SQL
-DROP_TABLE_SQL = "DROP TABLE IF EXISTS ai_service_behavior_memory"
+DROP_TABLE_SQL = "DROP TABLE IF EXISTS ai_probability"
 
-# Create table SQL - ONLY the exact columns from daily_weekly.py (NO memory management columns)
+# Create table SQL
 CREATE_TABLE_SQL = """
-CREATE TABLE ai_service_behavior_memory
+CREATE TABLE ai_probability
 (
-    -- Service identifiers
-    project_id UInt32,
-    application_id UInt32,
-    service_id UInt64,
     service String,
-    metric String,
-
-    -- Baseline information
-    baseline_state String,
-    baseline_value Float64,
-
-    -- Pattern information
-    pattern_type String,
-    pattern_window String,
-
-    -- Delta metrics
-    delta_success Float64,
-    delta_latency_p90 Float64,
-
-    -- Pattern confidence metrics
-    support_days UInt16,
-    confidence Float64,
-
-    -- New confidence columns (null for weekly patterns)
-    long_term Nullable(Float64),
-    recency Nullable(Float64),
-
-    -- Temporal tracking (with time)
-    first_seen DateTime,
-    last_seen DateTime,
-    detected_at DateTime
+    service_id UInt32,
+    recurrence_probability Float64,
+    service_criticality Float64,
+    weighted_risk Float64,
+    detected_at DateTime DEFAULT now()
 )
 ENGINE = MergeTree()
-ORDER BY (project_id, application_id, service_id, service, metric, pattern_type, pattern_window)
+ORDER BY (service_id, service)
 SETTINGS index_granularity = 8192
 """
 
+# Insert sample data
 
-def recreate_table():
-    """Drop and recreate the ai_service_behavior_memory table"""
+
+def create_ai_probability_table():
+    """Drop and recreate the ai_probability table and insert sample data"""
     try:
         logger.info("=" * 80)
-        logger.info("Recreating ai_service_behavior_memory Table")
+        logger.info("Initializing ai_probability Table")
         logger.info("=" * 80)
         
         # Connect to ClickHouse
@@ -93,13 +72,19 @@ def recreate_table():
         logger.info("✓ Table dropped successfully")
         
         # Create new table
-        logger.info("\nCreating new table with correct schema...")
+        logger.info("\nCreating new table with the following schema:")
+        logger.info("- service: String")
+        logger.info("- service_id: UInt32")
+        logger.info("- recurrence_probability: Float64")
+        logger.info("- service_criticality: Float64")
+        logger.info("- weighted_risk: Float64")
+        
         client.command(CREATE_TABLE_SQL)
         logger.info("✓ Table created successfully")
         
         # Verify table structure
         logger.info("\nVerifying table structure...")
-        result = client.query("DESCRIBE TABLE ai_service_behavior_memory")
+        result = client.query("DESCRIBE TABLE ai_probability")
         
         logger.info("\n✓ Table Structure:")
         logger.info("-" * 80)
@@ -112,23 +97,19 @@ def recreate_table():
             col_default = row[2] if len(row) > 2 else ''
             logger.info(f"{col_name:<25} {col_type:<20} {col_default:<30}")
         
-        logger.info("-" * 80)
-        logger.info(f"\nTotal columns: {len(result.result_rows)}")
-        
         # Close connection
         client.close()
         logger.info("\n✓ Connection closed")
         
         logger.info("\n" + "=" * 80)
-        logger.info("TABLE RECREATED SUCCESSFULLY")
+        logger.info("AI PROBABILITY TABLE CREATED SUCCESSFULLY (EMPTY)")
         logger.info("=" * 80)
         
         return True
         
     except Exception as e:
-        logger.error(f"\n❌ Failed to recreate table: {str(e)}")
+        logger.error(f"\n❌ Failed to process: {str(e)}")
         raise
 
-
 if __name__ == "__main__":
-    recreate_table()
+    create_ai_probability_table()

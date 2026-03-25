@@ -223,3 +223,51 @@ SELECT
     success_rate_p25,
     success_rate_p75
 FROM metrics.ai_service_features_hourly;
+
+
+CREATE OR REPLACE VIEW metrics.ai_baseline_stats_30d AS
+WITH core AS (
+    SELECT *
+    FROM metrics.ai_baseline_view_2
+),
+
+delta_calc AS (
+    SELECT
+        h.application_id,
+        h.service_id,
+        h.service,
+        h.metric,
+
+        abs(h.success_rate_p50 - c.baseline_value) AS delta_success,
+        abs(h.p90_latency - c.baseline_value_p90) AS delta_latency,
+
+        h.ts_hour
+
+    FROM metrics.ai_service_features_hourly h
+    INNER JOIN core c
+        ON h.application_id = c.application_id
+       AND h.service_id     = c.service_id
+       AND h.metric         = c.metric
+
+    WHERE h.ts_hour >= (
+        SELECT max(ts_hour) - INTERVAL 30 DAY
+        FROM metrics.ai_service_features_hourly
+    )
+)
+
+SELECT
+    application_id,
+    service_id,
+    service,
+    metric,
+    quantile(0.5)(delta_success) AS delta_median_success,
+    quantile(0.5)(delta_latency) AS delta_median_latency,
+    count() AS observed_hours_30d,
+    count() / (30 * 24.0) AS coverage_ratio_30d
+
+FROM delta_calc
+GROUP BY
+    application_id,
+    service_id,
+    service,
+    metric;
