@@ -49,7 +49,7 @@ def classify_baseline(breach_ratio):
 
 ## Volume-Driven Detection
 
-def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d):
+def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     """
     Detect volume-driven pattern from hourly data
 
@@ -68,8 +68,8 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d):
     if len(hourly_subset) < CONFIG["VOLUME_MIN_DATA_POINTS"]:
         return None
 
-    # Get last N days of data (time-based filtering)
-    max_date = hourly_subset['ts_hour'].max()
+    # Get last N days anchored to scheduled day boundary — prevents delay skew
+    max_date = anchor
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(days=CONFIG["VOLUME_TIME_WINDOW_DAYS"])]
 
     if len(recent) < CONFIG["VOLUME_MIN_DATA_POINTS"]:  # Need at least N hours of data in last N days
@@ -129,7 +129,7 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d):
     }
 
 
-def promote_volume(baseline_df, baseline_30d_df, hourly_df):
+def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
     """
     Detect and promote volume-driven patterns
 
@@ -166,14 +166,14 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df):
         baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
         # Detect volume-driven pattern
-        volume_result = detect_volume_pattern(group, base, baseline_30d)
+        volume_result = detect_volume_pattern(group, base, baseline_30d, anchor)
 
         if volume_result is None:
             continue
 
         # --- VOLUME GATE ---
-        # Use last N days for volume calculation
-        max_date = group.ts_hour.max()
+        # Use last N days anchored to scheduled day boundary
+        max_date = anchor
         volume_window_start = max_date - pd.Timedelta(days=CONFIG["VOLUME_GATE_DAYS"] - 1)
 
         recent_30d = group[
@@ -259,11 +259,15 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
+    # Anchor to today midnight — any GitHub Actions delay is ignored
+    anchor = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    logger.info(f"\nAnchor (day boundary): {anchor}")
+
     logger.info("\n" + "=" * 80)
     logger.info("Running VOLUME-DRIVEN pattern detection...")
     logger.info("=" * 80)
 
-    volume_df = promote_volume(baseline_df, baseline_30d_df, hourly_df)
+    volume_df = promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor)
 
     logger.info(f"\n✓ Volume-driven patterns detected: {len(volume_df)}")
 

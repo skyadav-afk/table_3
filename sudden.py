@@ -111,7 +111,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
     return None
 
 
-def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
+def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
     """
     Detect and promote sudden drop/spike patterns
 
@@ -128,8 +128,8 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
 
     promoted = []
 
-    # Get GLOBAL maximum hour (the most recent hour across ALL data)
-    global_max_hour = hourly_df['ts_hour'].max()
+    # Use anchor (previous completed hour) — prevents delay skew
+    global_max_hour = anchor
     logger.info(f"Global maximum hour for sudden pattern detection: {global_max_hour}")
 
     # Filter hourly data to only the global maximum hour
@@ -242,12 +242,16 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
+    # Anchor to previous completed hour — any GitHub Actions delay is ignored
+    anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - pd.Timedelta(hours=1)
+    logger.info(f"\nAnchor (previous completed hour): {anchor}")
+
     # Run sudden pattern detection
     logger.info("\n" + "=" * 80)
     logger.info("Running sudden pattern detection...")
     logger.info("=" * 80)
 
-    sudden_df = promote_sudden(baseline_df, baseline_30d_df, hourly_df)
+    sudden_df = promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor)
 
     logger.info("\n" + "=" * 80)
     logger.info("RESULTS")

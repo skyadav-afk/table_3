@@ -49,7 +49,7 @@ def classify_baseline(breach_ratio):
 
 ## Drift Detection
 
-def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d):
+def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     """
     Detect drift pattern from recent hourly data
 
@@ -57,6 +57,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d):
         hourly_subset: Hourly data filtered for specific app/service/metric
         baseline_row: Baseline stats from ai_baseline_view_2
         baseline_30d: 30-day baseline stats with pre-calculated deltas
+        anchor: Fixed hour boundary (datetime truncated to hour) — prevents delay skew
 
     Returns:
         dict with drift pattern info or None
@@ -66,8 +67,8 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d):
 
     is_grid = baseline_row["metric"] == "success_rate" and "grid" in baseline_row["service"].lower()
 
-    # Get last N hours of data (actual time-based filtering, not row-based)
-    max_date = hourly_subset['ts_hour'].max()
+    # Get last N hours of data anchored to scheduled hour boundary, not actual runtime
+    max_date = anchor
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(hours=CONFIG["DRIFT_HOURS"])]
 
     if is_grid:
@@ -150,7 +151,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d):
     }
 
 
-def promote_drift(baseline_df, baseline_30d_df, hourly_df):
+def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
     """
     Detect and promote drift patterns (drift_up and drift_down)
 
@@ -193,7 +194,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
         baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
         # Detect drift pattern
-        drift_result = detect_drift_pattern(group, base, baseline_30d)
+        drift_result = detect_drift_pattern(group, base, baseline_30d, anchor)
 
         if drift_result is None:
             if metric == "success_rate" and "grid" in svc.lower():
@@ -204,8 +205,8 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
             logger.info(f"DEBUG: drift_result = {drift_result}")
 
         # --- VOLUME GATE ---
-        # Use last N days for volume calculation
-        max_date = group.ts_hour.max()
+        # Use last N days anchored to scheduled hour boundary
+        max_date = anchor
         volume_window_start = max_date - pd.Timedelta(days=CONFIG["DRIFT_VOLUME_GATE_DAYS"] - 1)
 
         recent_30d = group[
@@ -302,12 +303,16 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
+    # Anchor to current hour boundary — any GitHub Actions delay is ignored
+    anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    logger.info(f"\nAnchor (hour boundary): {anchor}")
+
     # Run drift pattern detection
     logger.info("\n" + "=" * 80)
     logger.info("Running drift pattern detection...")
     logger.info("=" * 80)
 
-    drift_df = promote_drift(baseline_df, baseline_30d_df, hourly_df)
+    drift_df = promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor)
 
     logger.info("\n" + "=" * 80)
     logger.info("RESULTS")
