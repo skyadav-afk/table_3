@@ -231,6 +231,7 @@ if __name__ == "__main__":
     import logging
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
+    from run_log import log_run
 
     CLICKHOUSE_CONFIG = {
         'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
@@ -250,6 +251,8 @@ if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("VOLUME-DRIVEN PATTERN DETECTION - STANDALONE MODE")
     logger.info("=" * 80)
+
+    started_at = datetime.utcnow()
 
     logger.info("\nFetching all data from ClickHouse...")
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
@@ -309,11 +312,14 @@ if __name__ == "__main__":
             logger.info("✓ Connection closed")
 
             print(f"\n✅ SUCCESS: {len(volume_df)} volume-driven patterns written to {TARGET_TABLE}")
+            log_run('volume', anchor, started_at, len(volume_df), 'success')
 
         except Exception as e:
             logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            log_run('volume', anchor, started_at, 0, 'failed', str(e))
             print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
         print("\n⚠️  No volume-driven patterns detected with current thresholds")
+        log_run('volume', anchor, started_at, 0, 'success')

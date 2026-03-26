@@ -211,6 +211,7 @@ if __name__ == "__main__":
     import logging
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
+    from run_log import log_run
 
     # ClickHouse connection configuration
     CLICKHOUSE_CONFIG = {
@@ -232,6 +233,8 @@ if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("SUDDEN DROP/SPIKE PATTERN DETECTION - STANDALONE MODE")
     logger.info("=" * 80)
+
+    started_at = datetime.utcnow()
 
     # Fetch all required data using fetch_data.py main function
     logger.info("\nFetching all data from ClickHouse...")
@@ -303,9 +306,11 @@ if __name__ == "__main__":
             logger.info("✓ Connection closed")
 
             print(f"\n✅ SUCCESS: {len(sudden_df)} sudden patterns written to {TARGET_TABLE}")
+            log_run('sudden', anchor, started_at, len(sudden_df), 'success')
 
         except Exception as e:
             logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            log_run('sudden', anchor, started_at, 0, 'failed', str(e))
             print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
@@ -313,4 +318,5 @@ if __name__ == "__main__":
         print("\n⚠️  No sudden patterns detected with current thresholds")
         print(f"   - Success drop threshold: >= {CONFIG['SUDDEN_SUCCESS_DROP']}%")
         print(f"   - Latency spike threshold: >= {CONFIG['SUDDEN_LATENCY_SPIKE']}s")
+        log_run('sudden', anchor, started_at, 0, 'success')
 

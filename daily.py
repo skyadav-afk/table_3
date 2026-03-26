@@ -354,6 +354,7 @@ if __name__ == "__main__":
     import logging
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
+    from run_log import log_run
 
     # ClickHouse connection configuration
     CLICKHOUSE_CONFIG = {
@@ -375,6 +376,8 @@ if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("DAILY PATTERN DETECTION - STANDALONE MODE")
     logger.info("=" * 80)
+
+    started_at = datetime.utcnow()
 
     # Fetch all required data using fetch_data.py main function
     logger.info("\nFetching all data from ClickHouse...")
@@ -451,11 +454,14 @@ if __name__ == "__main__":
             logger.info("✓ Connection closed")
 
             print(f"\n✅ SUCCESS: {len(daily_df)} daily patterns written to {TARGET_TABLE}")
+            log_run('daily', anchor, started_at, len(daily_df), 'success')
 
         except Exception as e:
             logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            log_run('daily', anchor, started_at, 0, 'failed', str(e))
             print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
         print("\n⚠️  No daily patterns detected with current thresholds")
+        log_run('daily', anchor, started_at, 0, 'success')
