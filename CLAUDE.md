@@ -11,6 +11,9 @@ AI Service Behavior Detector — analyzes hourly service metrics stored in Click
 ```bash
 source venv/bin/activate
 pip install -r requirements.txt
+
+# One-time DB setup (only needed on first deployment)
+python create_run_log.py       # Creates ai_pattern_run_log table
 ```
 
 Dependencies: `pandas`, `numpy`, `clickhouse-connect`, `requests==2.31.0`
@@ -28,14 +31,17 @@ python baseline_stats_30d.py   # 30-day delta stats → ai_baseline_stats_30d
 python stagging.py             # Populates ai_detector_staging1
 
 # 3. Detect and promote patterns to memory
-python daily_weekly1.py        # Seasonal patterns
+python daily.py                # Daily seasonal patterns
+python weekly.py               # Weekly seasonal patterns
 python drift.py                # Gradual drift
-python volume1.py              # Volume-correlated patterns
+python volume1.py              # Volume-correlated patterns (reads ai_metrics_5m_v2, not hourly table)
 python sudden.py               # Sudden drops/spikes
 
 # 4. (Optional) Compute risk scores
 python ai_Probability.py       # Populates ai_probability table
 ```
+
+To debug data fetching independently, run `python fetch_data.py` — its `main()` exercises all fetch functions and prints row counts.
 
 ## Architecture
 
@@ -74,6 +80,14 @@ All thresholds live in a single `CONFIG` dict. Key groups:
 ### ClickHouse Connection
 
 Credentials are hardcoded in each script (host, port 8123, database `metrics`). The `fetch_data.py` module centralizes the connection logic and baseline/staging queries — all detector scripts import from it.
+
+### Run Log
+
+Every pattern script calls `run_log.log_run()` on completion, writing to `ai_pattern_run_log`. Fields: `script_name`, `anchor` (boundary time), `started_at`, `completed_at`, `patterns_written`, `status`, `error_message`.
+
+### Utilities
+
+- `recreate_table.py` — drops and recreates detection tables (use for schema resets, not routine operation)
 
 ### SQL Setup
 
