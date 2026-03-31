@@ -57,7 +57,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
         hourly_subset: Hourly data filtered for specific app/service/metric
         baseline_row: Baseline stats from ai_baseline_view_2
         baseline_30d: 30-day baseline stats with pre-calculated deltas
-        anchor: Fixed hour boundary (datetime truncated to hour) — prevents delay skew
+        anchor: Fixed hour boundary (datetime truncated to hour) - prevents delay skew
 
     Returns:
         dict with drift pattern info or None
@@ -301,12 +301,12 @@ if __name__ == "__main__":
     logger.info("\nFetching all data from ClickHouse...")
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
-    logger.info("\n✓ All data loaded successfully")
+    logger.info("\n[OK] All data loaded successfully")
     logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to current hour boundary — any GitHub Actions delay is ignored
+    # Anchor to current hour boundary - any GitHub Actions delay is ignored
     anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
     logger.info(f"\nAnchor (hour boundary): {anchor}")
 
@@ -321,7 +321,7 @@ if __name__ == "__main__":
     logger.info("RESULTS")
     logger.info("=" * 80)
 
-    print(f"\n✓ Drift patterns detected: {len(drift_df)}")
+    print(f"\n[OK] Drift patterns detected: {len(drift_df)}")
 
     if len(drift_df) > 0:
         print(f"\nPattern breakdown:")
@@ -333,7 +333,7 @@ if __name__ == "__main__":
         # Save to CSV backup
         output_file = f"drift_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         drift_df.to_csv(output_file, index=False)
-        print(f"\n💾 Backup CSV saved to: {output_file}")
+        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
 
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
@@ -351,32 +351,32 @@ if __name__ == "__main__":
             )
 
             version = client.command('SELECT version()')
-            logger.info(f"✓ Connected to ClickHouse version: {version}")
+            logger.info(f"[OK] Connected to ClickHouse version: {version}")
 
             logger.info(f"\nInserting {len(drift_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, drift_df)
 
-            logger.info(f"✓ Successfully wrote {len(drift_df)} drift patterns to {TARGET_TABLE}")
+            logger.info(f"[OK] Successfully wrote {len(drift_df)} drift patterns to {TARGET_TABLE}")
 
             # Verify
             count_query = f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type IN ('drift_up', 'drift_down')"
             total_count = client.command(count_query)
-            logger.info(f"✓ Verified: Total drift patterns in table: {total_count}")
+            logger.info(f"[OK] Verified: Total drift patterns in table: {total_count}")
 
             client.close()
-            logger.info("✓ Connection closed")
+            logger.info("[OK] Connection closed")
 
-            print(f"\n✅ SUCCESS: {len(drift_df)} drift patterns written to {TARGET_TABLE}")
+            print(f"\n[OK] SUCCESS: {len(drift_df)} drift patterns written to {TARGET_TABLE}")
             log_run('drift', anchor, started_at, len(drift_df), 'success')
 
         except Exception as e:
-            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
             log_run('drift', anchor, started_at, 0, 'failed', str(e))
-            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
-        print("\n⚠️  No drift patterns detected with current thresholds")
+        print("\n[WARN]  No drift patterns detected with current thresholds")
         print(f"   - Drift window: {CONFIG['DRIFT_HOURS']} hours")
         print(f"   - Minimum hours required: {CONFIG['DRIFT_MIN_HOURS']}")
         log_run('drift', anchor, started_at, 0, 'success')

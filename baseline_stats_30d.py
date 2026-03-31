@@ -84,7 +84,7 @@ def main():
         # Recreate the view
         logger.info("\nRecreating ai_baseline_stats_30d view...")
         client.command(CREATE_VIEW_SQL)
-        logger.info("✓ View recreated successfully")
+        logger.info("[OK] View recreated successfully")
 
         # Total rows in the view
         total = client.command("SELECT count() FROM metrics.ai_baseline_stats_30d")
@@ -105,7 +105,7 @@ def main():
             print(f"{str(row[0]):<16} {str(row[1]):>10} {str(row[2]):>20} {str(row[3]):>20}")
 
         client.close()
-        logger.info("\n✓ Done. ai_baseline_stats_30d is up to date.")
+        logger.info("\n[OK] Done. ai_baseline_stats_30d is up to date.")
 
     except Exception as e:
         logger.error(f"Failed to update view: {e}")

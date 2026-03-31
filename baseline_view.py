@@ -59,14 +59,14 @@ def main():
     # Recreate the view (picks up any definition changes)
     logger.info("\nRecreating ai_baseline_view_2...")
     client.command(CREATE_VIEW_SQL)
-    logger.info("✓ View recreated")
+    logger.info("[OK] View recreated")
 
     # Check the date range being used
     max_ts = client.command("SELECT MAX(ts_hour) FROM metrics.ai_service_features_hourly")
     min_ts = client.command(
         "SELECT MAX(ts_hour) - INTERVAL 14 DAY FROM metrics.ai_service_features_hourly"
     )
-    logger.info(f"\nHourly data window: {min_ts}  →  {max_ts}")
+    logger.info(f"\nHourly data window: {min_ts}  ->  {max_ts}")
 
     # Total rows in the view
     total = client.command("SELECT count() FROM metrics.ai_baseline_view_2")
@@ -119,7 +119,7 @@ def main():
             print(f"{row[0]:>8} {row[2]:<16} {row[3]:>10} {row[4]:>14}  {svc}")
 
     client.close()
-    logger.info("\n✓ Done. ai_baseline_view_2 is up to date.")
+    logger.info("\n[OK] Done. ai_baseline_view_2 is up to date.")
 
 
 if __name__ == "__main__":

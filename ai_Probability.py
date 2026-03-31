@@ -64,12 +64,12 @@ def create_ai_probability_table():
         
         # Test connection
         version = client.command('SELECT version()')
-        logger.info(f"✓ Connected to ClickHouse version: {version}")
+        logger.info(f"[OK] Connected to ClickHouse version: {version}")
         
         # Drop existing table
         logger.info("\nDropping existing table (if exists)...")
         client.command(DROP_TABLE_SQL)
-        logger.info("✓ Table dropped successfully")
+        logger.info("[OK] Table dropped successfully")
         
         # Create new table
         logger.info("\nCreating new table with the following schema:")
@@ -80,13 +80,13 @@ def create_ai_probability_table():
         logger.info("- weighted_risk: Float64")
         
         client.command(CREATE_TABLE_SQL)
-        logger.info("✓ Table created successfully")
+        logger.info("[OK] Table created successfully")
         
         # Verify table structure
         logger.info("\nVerifying table structure...")
         result = client.query("DESCRIBE TABLE ai_probability")
         
-        logger.info("\n✓ Table Structure:")
+        logger.info("\n[OK] Table Structure:")
         logger.info("-" * 80)
         logger.info(f"{'Column Name':<25} {'Type':<20} {'Default':<30}")
         logger.info("-" * 80)
@@ -99,7 +99,7 @@ def create_ai_probability_table():
         
         # Close connection
         client.close()
-        logger.info("\n✓ Connection closed")
+        logger.info("\n[OK] Connection closed")
         
         logger.info("\n" + "=" * 80)
         logger.info("AI PROBABILITY TABLE CREATED SUCCESSFULLY (EMPTY)")
@@ -108,7 +108,7 @@ def create_ai_probability_table():
         return True
         
     except Exception as e:
-        logger.error(f"\n❌ Failed to process: {str(e)}")
+        logger.error(f"\n[FAIL] Failed to process: {str(e)}")
         raise
 
 if __name__ == "__main__":

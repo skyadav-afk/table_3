@@ -7,8 +7,8 @@ CONFIG = {
     # BASELINE CLASSIFICATION THRESHOLDS
     # Used in: daily_weekly.py, drift.py, volume.py, sudden.py
     # ========================================================================
-    "BASELINE_CHRONIC_THRESHOLD": 0.6,      # breach_ratio >= 0.6 → CHRONIC
-    "BASELINE_AT_RISK_THRESHOLD": 0.3,      # breach_ratio >= 0.3 → AT_RISK
+    "BASELINE_CHRONIC_THRESHOLD": 0.6,      # breach_ratio >= 0.6 -> CHRONIC
+    "BASELINE_AT_RISK_THRESHOLD": 0.3,      # breach_ratio >= 0.3 -> AT_RISK
 
     # ========================================================================
     # COMMON THRESHOLDS (used across multiple modules)
@@ -62,8 +62,8 @@ CONFIG = {
     "VOLUME_GATE_DAYS": 30,                         # Volume gate window (days)
 
     # Correlation thresholds
-    "VOLUME_SUCCESS_CORRELATION_THRESHOLD": -0.6,   # Success rate: volume up → success down
-    "VOLUME_LATENCY_CORRELATION_THRESHOLD": 0.6,    # Latency: volume up → latency up
+    "VOLUME_SUCCESS_CORRELATION_THRESHOLD": -0.6,   # Success rate: volume up -> success down
+    "VOLUME_LATENCY_CORRELATION_THRESHOLD": 0.6,    # Latency: volume up -> latency up
 
     # ========================================================================
     # SUDDEN.PY THRESHOLDS

@@ -68,7 +68,7 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     if len(hourly_subset) < CONFIG["VOLUME_MIN_DATA_POINTS"]:
         return None
 
-    # Get last N days anchored to scheduled day boundary — prevents delay skew
+    # Get last N days anchored to scheduled day boundary - prevents delay skew
     max_date = anchor
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(days=CONFIG["VOLUME_TIME_WINDOW_DAYS"])]
 
@@ -257,12 +257,12 @@ if __name__ == "__main__":
     logger.info("\nFetching all data from ClickHouse...")
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
-    logger.info("\n✓ All data loaded successfully")
+    logger.info("\n[OK] All data loaded successfully")
     logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to today midnight — any GitHub Actions delay is ignored
+    # Anchor to today midnight - any GitHub Actions delay is ignored
     anchor = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     logger.info(f"\nAnchor (day boundary): {anchor}")
 
@@ -272,16 +272,16 @@ if __name__ == "__main__":
 
     volume_df = promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor)
 
-    logger.info(f"\n✓ Volume-driven patterns detected: {len(volume_df)}")
+    logger.info(f"\n[OK] Volume-driven patterns detected: {len(volume_df)}")
 
     if len(volume_df) > 0:
-        print(f"\n✓ Total patterns detected: {len(volume_df)}")
+        print(f"\n[OK] Total patterns detected: {len(volume_df)}")
         print(f"\nFirst 10 patterns:")
         print(volume_df.head(10).to_string())
 
         output_file = f"volume_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         volume_df.to_csv(output_file, index=False)
-        print(f"\n💾 Backup CSV saved to: {output_file}")
+        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
 
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")
@@ -298,28 +298,28 @@ if __name__ == "__main__":
             )
 
             version = client.command('SELECT version()')
-            logger.info(f"✓ Connected to ClickHouse version: {version}")
+            logger.info(f"[OK] Connected to ClickHouse version: {version}")
 
             logger.info(f"\nInserting {len(volume_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, volume_df)
 
-            logger.info(f"✓ Successfully wrote {len(volume_df)} patterns to {TARGET_TABLE}")
+            logger.info(f"[OK] Successfully wrote {len(volume_df)} patterns to {TARGET_TABLE}")
 
             total_count = client.command(f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type = 'volume_driven'")
-            logger.info(f"✓ Verified: Total volume_driven patterns in table: {total_count}")
+            logger.info(f"[OK] Verified: Total volume_driven patterns in table: {total_count}")
 
             client.close()
-            logger.info("✓ Connection closed")
+            logger.info("[OK] Connection closed")
 
-            print(f"\n✅ SUCCESS: {len(volume_df)} volume-driven patterns written to {TARGET_TABLE}")
+            print(f"\n[OK] SUCCESS: {len(volume_df)} volume-driven patterns written to {TARGET_TABLE}")
             log_run('volume', anchor, started_at, len(volume_df), 'success')
 
         except Exception as e:
-            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
             log_run('volume', anchor, started_at, 0, 'failed', str(e))
-            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
-        print("\n⚠️  No volume-driven patterns detected with current thresholds")
+        print("\n[WARN]  No volume-driven patterns detected with current thresholds")
         log_run('volume', anchor, started_at, 0, 'success')

@@ -6,9 +6,9 @@ Run this as the entrypoint in a Docker container or pod:
 
 Schedule:
   - Every hour        : sudden.py, drift.py
-  - Daily at 00:00    : baseline refresh → stagging → daily.py → ai_Probability.py
+  - Daily at 00:00    : baseline refresh -> stagging -> daily.py -> ai_Probability.py
   - Daily at 23:00    : volume1.py (end-of-day full-day data)
-  - Weekly (Sunday)   : stagging.py → weekly.py
+  - Weekly (Sunday)   : stagging.py -> weekly.py
 """
 
 import subprocess
@@ -59,15 +59,15 @@ def hourly_job():
 
 def daily_job():
     """Daily at 00:00: refresh baselines, stage candidates, run daily patterns, score risk."""
-    logger.info("=== Daily job: baseline → staging → daily → probability ===")
+    logger.info("=== Daily job: baseline -> staging -> daily -> probability ===")
     ok = run_script("baseline_view.py")
     if not ok:
-        logger.error("baseline_view.py failed — aborting daily job")
+        logger.error("baseline_view.py failed - aborting daily job")
         return
     run_script("baseline_stats_30d.py")
     ok = run_script("stagging.py")
     if not ok:
-        logger.error("stagging.py failed — skipping daily.py")
+        logger.error("stagging.py failed - skipping daily.py")
         return
     run_script("daily.py")
     run_script("ai_Probability.py")
@@ -81,10 +81,10 @@ def eod_job():
 
 def weekly_job():
     """Weekly on Sunday 00:00: re-stage and run weekly pattern detection."""
-    logger.info("=== Weekly job: staging → weekly ===")
+    logger.info("=== Weekly job: staging -> weekly ===")
     ok = run_script("stagging.py")
     if not ok:
-        logger.error("stagging.py failed — skipping weekly.py")
+        logger.error("stagging.py failed - skipping weekly.py")
         return
     run_script("weekly.py")
 
@@ -94,7 +94,7 @@ def weekly_job():
 # ---------------------------------------------------------------------------
 
 def main():
-    logger.info("Scheduler starting — running initial hourly + daily jobs")
+    logger.info("Scheduler starting - running initial hourly + daily jobs")
 
     # Run once immediately on startup so the container is useful right away
     hourly_job()

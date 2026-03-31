@@ -128,7 +128,7 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
 
     promoted = []
 
-    # Use anchor (previous completed hour) — prevents delay skew
+    # Use anchor (previous completed hour) - prevents delay skew
     global_max_hour = anchor
     logger.info(f"Global maximum hour for sudden pattern detection: {global_max_hour}")
 
@@ -240,12 +240,12 @@ if __name__ == "__main__":
     logger.info("\nFetching all data from ClickHouse...")
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
-    logger.info("\n✓ All data loaded successfully")
+    logger.info("\n[OK] All data loaded successfully")
     logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to previous completed hour — any GitHub Actions delay is ignored
+    # Anchor to previous completed hour - any GitHub Actions delay is ignored
     anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - pd.Timedelta(hours=1)
     logger.info(f"\nAnchor (previous completed hour): {anchor}")
 
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     logger.info("RESULTS")
     logger.info("=" * 80)
 
-    print(f"\n✓ Sudden patterns detected: {len(sudden_df)}")
+    print(f"\n[OK] Sudden patterns detected: {len(sudden_df)}")
 
     if len(sudden_df) > 0:
         print(f"\nPattern breakdown:")
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         # Save to CSV backup
         output_file = f"sudden_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         sudden_df.to_csv(output_file, index=False)
-        print(f"\n💾 Backup CSV saved to: {output_file}")
+        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
 
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
@@ -290,32 +290,32 @@ if __name__ == "__main__":
             )
 
             version = client.command('SELECT version()')
-            logger.info(f"✓ Connected to ClickHouse version: {version}")
+            logger.info(f"[OK] Connected to ClickHouse version: {version}")
 
             logger.info(f"\nInserting {len(sudden_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, sudden_df)
 
-            logger.info(f"✓ Successfully wrote {len(sudden_df)} sudden patterns to {TARGET_TABLE}")
+            logger.info(f"[OK] Successfully wrote {len(sudden_df)} sudden patterns to {TARGET_TABLE}")
 
             # Verify
             count_query = f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type IN ('sudden_drop', 'sudden_spike')"
             total_count = client.command(count_query)
-            logger.info(f"✓ Verified: Total sudden patterns in table: {total_count}")
+            logger.info(f"[OK] Verified: Total sudden patterns in table: {total_count}")
 
             client.close()
-            logger.info("✓ Connection closed")
+            logger.info("[OK] Connection closed")
 
-            print(f"\n✅ SUCCESS: {len(sudden_df)} sudden patterns written to {TARGET_TABLE}")
+            print(f"\n[OK] SUCCESS: {len(sudden_df)} sudden patterns written to {TARGET_TABLE}")
             log_run('sudden', anchor, started_at, len(sudden_df), 'success')
 
         except Exception as e:
-            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
             log_run('sudden', anchor, started_at, 0, 'failed', str(e))
-            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
-        print("\n⚠️  No sudden patterns detected with current thresholds")
+        print("\n[WARN]  No sudden patterns detected with current thresholds")
         print(f"   - Success drop threshold: >= {CONFIG['SUDDEN_SUCCESS_DROP']}%")
         print(f"   - Latency spike threshold: >= {CONFIG['SUDDEN_LATENCY_SPIKE']}s")
         log_run('sudden', anchor, started_at, 0, 'success')

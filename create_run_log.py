@@ -1,6 +1,6 @@
 """
 Creates ai_pattern_run_log table in ClickHouse.
-Run once at setup — tracks every pattern script execution.
+Run once at setup - tracks every pattern script execution.
 """
 
 import logging
@@ -42,7 +42,7 @@ def main():
     logger.info(f"Connected to ClickHouse {version}")
 
     client.command(CREATE_TABLE_SQL)
-    logger.info("✓ ai_pattern_run_log table created (or already exists)")
+    logger.info("[OK] ai_pattern_run_log table created (or already exists)")
 
     cols = client.query("DESCRIBE TABLE metrics.ai_pattern_run_log")
     print(f"\n{'Column':<20} {'Type':<20}")
@@ -51,7 +51,7 @@ def main():
         print(f"{row[0]:<20} {row[1]:<20}")
 
     client.close()
-    logger.info("\n✓ Done.")
+    logger.info("\n[OK] Done.")
 
 if __name__ == "__main__":
     main()

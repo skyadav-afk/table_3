@@ -143,7 +143,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
                 (hourly_df.hour == hour)
             ].copy()
 
-            # Anchor to scheduled day boundary — prevents delay skew
+            # Anchor to scheduled day boundary - prevents delay skew
             max_date = anchor
 
             # LONG TERM CONFIDENCE: last N days from max date
@@ -218,7 +218,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
                 (hourly_df.hour == hour)
             ].copy()
 
-            # Anchor to scheduled day boundary — prevents delay skew
+            # Anchor to scheduled day boundary - prevents delay skew
             max_date = anchor
 
             # Count total weeks from hourly_df where total_windows > 0 at this day_of_week and hour
@@ -383,7 +383,7 @@ if __name__ == "__main__":
     logger.info("\nFetching all data from ClickHouse...")
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
-    logger.info("\n✓ All data loaded successfully")
+    logger.info("\n[OK] All data loaded successfully")
     logger.info(f"  - Staging: {staging_df.shape[0]} rows")
     logger.info(f"  - Baseline: {baseline_df.shape[0]} rows")
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     logger.info("Running WEEKLY pattern detection...")
     logger.info("=" * 80)
 
-    # Anchor to today midnight — any GitHub Actions delay is ignored
+    # Anchor to today midnight - any GitHub Actions delay is ignored
     anchor = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     logger.info(f"\nAnchor (day boundary): {anchor}")
 
@@ -404,7 +404,7 @@ if __name__ == "__main__":
     logger.info("RESULTS")
     logger.info("=" * 80)
 
-    print(f"\n✓ Weekly patterns detected: {len(weekly_df)}")
+    print(f"\n[OK] Weekly patterns detected: {len(weekly_df)}")
 
     if len(weekly_df) > 0:
         print(f"\nPattern breakdown:")
@@ -416,7 +416,7 @@ if __name__ == "__main__":
         # Save to CSV backup
         output_file = f"weekly_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         weekly_df.to_csv(output_file, index=False)
-        print(f"\n💾 Backup CSV saved to: {output_file}")
+        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
 
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
@@ -434,34 +434,34 @@ if __name__ == "__main__":
             )
 
             version = client.command('SELECT version()')
-            logger.info(f"✓ Connected to ClickHouse version: {version}")
+            logger.info(f"[OK] Connected to ClickHouse version: {version}")
 
             logger.info(f"\nDeleting existing weekly patterns from {TARGET_TABLE}...")
             client.command(f"ALTER TABLE {TARGET_TABLE} DELETE WHERE pattern_type = 'weekly'")
-            logger.info("✓ Existing weekly patterns deleted")
+            logger.info("[OK] Existing weekly patterns deleted")
 
             logger.info(f"\nInserting {len(weekly_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, weekly_df)
 
-            logger.info(f"✓ Successfully wrote {len(weekly_df)} patterns to {TARGET_TABLE}")
+            logger.info(f"[OK] Successfully wrote {len(weekly_df)} patterns to {TARGET_TABLE}")
 
             # Verify
             count_query = f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type = 'weekly'"
             total_count = client.command(count_query)
-            logger.info(f"✓ Verified: Total weekly patterns in table: {total_count}")
+            logger.info(f"[OK] Verified: Total weekly patterns in table: {total_count}")
 
             client.close()
-            logger.info("✓ Connection closed")
+            logger.info("[OK] Connection closed")
 
-            print(f"\n✅ SUCCESS: {len(weekly_df)} weekly patterns written to {TARGET_TABLE}")
+            print(f"\n[OK] SUCCESS: {len(weekly_df)} weekly patterns written to {TARGET_TABLE}")
             log_run('weekly', anchor, started_at, len(weekly_df), 'success')
 
         except Exception as e:
-            logger.error(f"\n❌ Failed to write to ClickHouse: {str(e)}")
+            logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
             log_run('weekly', anchor, started_at, 0, 'failed', str(e))
-            print(f"\n⚠️  Patterns saved to CSV but failed to write to ClickHouse")
+            print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
-        print("\n⚠️  No weekly patterns detected with current thresholds")
+        print("\n[WARN]  No weekly patterns detected with current thresholds")
         log_run('weekly', anchor, started_at, 0, 'success')

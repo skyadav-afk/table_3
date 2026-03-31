@@ -90,7 +90,7 @@ def main():
     # Truncate staging table for a clean refresh
     logger.info("\nTruncating ai_detector_staging1...")
     client.command('TRUNCATE TABLE metrics.ai_detector_staging1')
-    logger.info("✓ Table truncated")
+    logger.info("[OK] Table truncated")
 
     # Insert daily candidates
     logger.info("\nInserting daily candidates...")
@@ -98,7 +98,7 @@ def main():
     daily_count = client.command(
         "SELECT count() FROM metrics.ai_detector_staging1 WHERE pattern_type = 'daily_candidate'"
     )
-    logger.info(f"✓ Daily candidates inserted: {daily_count}")
+    logger.info(f"[OK] Daily candidates inserted: {daily_count}")
 
     # Insert weekly candidates
     logger.info("\nInserting weekly candidates...")
@@ -106,14 +106,14 @@ def main():
     weekly_count = client.command(
         "SELECT count() FROM metrics.ai_detector_staging1 WHERE pattern_type = 'weekly_candidate'"
     )
-    logger.info(f"✓ Weekly candidates inserted: {weekly_count}")
+    logger.info(f"[OK] Weekly candidates inserted: {weekly_count}")
 
     total = client.command("SELECT count() FROM metrics.ai_detector_staging1")
-    logger.info(f"\n✓ Total rows in ai_detector_staging1: {total}")
+    logger.info(f"\n[OK] Total rows in ai_detector_staging1: {total}")
     logger.info(f"  - daily_candidate : {daily_count}")
     logger.info(f"  - weekly_candidate: {weekly_count}")
 
-    # Quick sanity check — show a few rows
+    # Quick sanity check - show a few rows
     logger.info("\nSample rows:")
     result = client.query(
         "SELECT pattern_type, day_of_week, hour, count() as cnt "
@@ -128,7 +128,7 @@ def main():
         print(f"{row[0]:<20} {row[1]:>12} {row[2]:>6} {row[3]:>8}")
 
     client.close()
-    logger.info("\n✓ Done. ai_detector_staging1 is up to date.")
+    logger.info("\n[OK] Done. ai_detector_staging1 is up to date.")
 
 
 if __name__ == "__main__":
