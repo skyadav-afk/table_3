@@ -375,21 +375,21 @@ def main():
         logger.info("STAGING DATA RESULTS")
         logger.info("=" * 60)
 
-        print(f"\n✓ Staging DataFrame Shape: {staging_df.shape}")
+        print(f"\n[OK] Staging DataFrame Shape: {staging_df.shape}")
         print(f"  - Rows: {staging_df.shape[0]}")
         print(f"  - Columns: {staging_df.shape[1]}")
 
-        print(f"\n✓ Staging Column Names:")
+        print(f"\n[OK] Staging Column Names:")
         for i, col in enumerate(staging_df.columns, 1):
             print(f"  {i}. {col}")
 
-        print(f"\n✓ Staging Data Types:")
+        print(f"\n[OK] Staging Data Types:")
         print(staging_df.dtypes)
 
-        print(f"\n✓ Staging First 5 Rows:")
+        print(f"\n[OK] Staging First 5 Rows:")
         print(staging_df.head())
 
-        print(f"\n✓ Staging DataFrame Info:")
+        print(f"\n[OK] Staging DataFrame Info:")
         staging_df.info()
 
         # Fetch baseline data
@@ -404,21 +404,21 @@ def main():
         logger.info("BASELINE DATA RESULTS")
         logger.info("=" * 60)
 
-        print(f"\n✓ Baseline DataFrame Shape: {baseline_df.shape}")
+        print(f"\n[OK] Baseline DataFrame Shape: {baseline_df.shape}")
         print(f"  - Rows: {baseline_df.shape[0]}")
         print(f"  - Columns: {baseline_df.shape[1]}")
 
-        print(f"\n✓ Baseline Column Names:")
+        print(f"\n[OK] Baseline Column Names:")
         for i, col in enumerate(baseline_df.columns, 1):
             print(f"  {i}. {col}")
 
-        print(f"\n✓ Baseline Data Types:")
+        print(f"\n[OK] Baseline Data Types:")
         print(baseline_df.dtypes)
 
-        print(f"\n✓ Baseline First 5 Rows:")
+        print(f"\n[OK] Baseline First 5 Rows:")
         print(baseline_df.head())
 
-        print(f"\n✓ Baseline DataFrame Info:")
+        print(f"\n[OK] Baseline DataFrame Info:")
         baseline_df.info()
 
         # Fetch 30-day baseline data
@@ -433,21 +433,21 @@ def main():
         logger.info("30-DAY BASELINE DATA RESULTS")
         logger.info("=" * 60)
 
-        print(f"\n✓ 30-Day Baseline DataFrame Shape: {baseline_30d_df.shape}")
+        print(f"\n[OK] 30-Day Baseline DataFrame Shape: {baseline_30d_df.shape}")
         print(f"  - Rows: {baseline_30d_df.shape[0]}")
         print(f"  - Columns: {baseline_30d_df.shape[1]}")
 
-        print(f"\n✓ 30-Day Baseline Column Names:")
+        print(f"\n[OK] 30-Day Baseline Column Names:")
         for i, col in enumerate(baseline_30d_df.columns, 1):
             print(f"  {i}. {col}")
 
-        print(f"\n✓ 30-Day Baseline Data Types:")
+        print(f"\n[OK] 30-Day Baseline Data Types:")
         print(baseline_30d_df.dtypes)
 
-        print(f"\n✓ 30-Day Baseline First 5 Rows:")
+        print(f"\n[OK] 30-Day Baseline First 5 Rows:")
         print(baseline_30d_df.head())
 
-        print(f"\n✓ 30-Day Baseline DataFrame Info:")
+        print(f"\n[OK] 30-Day Baseline DataFrame Info:")
         baseline_30d_df.info()
 
         # Fetch hourly data
@@ -462,21 +462,21 @@ def main():
         logger.info("HOURLY DATA RESULTS")
         logger.info("=" * 60)
 
-        print(f"\n✓ Hourly DataFrame Shape: {hourly_df.shape}")
+        print(f"\n[OK] Hourly DataFrame Shape: {hourly_df.shape}")
         print(f"  - Rows: {hourly_df.shape[0]}")
         print(f"  - Columns: {hourly_df.shape[1]}")
 
-        print(f"\n✓ Hourly Column Names:")
+        print(f"\n[OK] Hourly Column Names:")
         for i, col in enumerate(hourly_df.columns, 1):
             print(f"  {i}. {col}")
 
-        print(f"\n✓ Hourly Data Types:")
+        print(f"\n[OK] Hourly Data Types:")
         print(hourly_df.dtypes)
 
-        print(f"\n✓ Hourly First 5 Rows:")
+        print(f"\n[OK] Hourly First 5 Rows:")
         print(hourly_df.head())
 
-        print(f"\n✓ Hourly DataFrame Info:")
+        print(f"\n[OK] Hourly DataFrame Info:")
         hourly_df.info()
 
         # Fetch 5-minute metrics data
@@ -491,32 +491,32 @@ def main():
         logger.info("5-MINUTE METRICS DATA RESULTS")
         logger.info("=" * 60)
 
-        print(f"\n✓ 5-Minute Metrics DataFrame Shape: {metrics_5m_df.shape}")
+        print(f"\n[OK] 5-Minute Metrics DataFrame Shape: {metrics_5m_df.shape}")
         print(f"  - Rows: {metrics_5m_df.shape[0]}")
         print(f"  - Columns: {metrics_5m_df.shape[1]}")
 
-        print(f"\n✓ 5-Minute Metrics Column Names:")
+        print(f"\n[OK] 5-Minute Metrics Column Names:")
         for i, col in enumerate(metrics_5m_df.columns, 1):
             print(f"  {i}. {col}")
 
-        print(f"\n✓ 5-Minute Metrics Data Types:")
+        print(f"\n[OK] 5-Minute Metrics Data Types:")
         print(metrics_5m_df.dtypes)
 
-        print(f"\n✓ 5-Minute Metrics First 5 Rows:")
+        print(f"\n[OK] 5-Minute Metrics First 5 Rows:")
         print(metrics_5m_df.head())
 
-        print(f"\n✓ 5-Minute Metrics DataFrame Info:")
+        print(f"\n[OK] 5-Minute Metrics DataFrame Info:")
         metrics_5m_df.info()
 
         # Summary
         logger.info("\n" + "=" * 60)
         logger.info("SUMMARY")
         logger.info("=" * 60)
-        print(f"\n✓ Staging Data Shape: {staging_df.shape}")
-        print(f"✓ Baseline Data Shape: {baseline_df.shape}")
-        print(f"✓ 30-Day Baseline Data Shape: {baseline_30d_df.shape}")
-        print(f"✓ Hourly Data Shape: {hourly_df.shape}")
-        print(f"✓ 5-Minute Metrics Data Shape: {metrics_5m_df.shape}")
+        print(f"\n[OK] Staging Data Shape: {staging_df.shape}")
+        print(f"[OK] Baseline Data Shape: {baseline_df.shape}")
+        print(f"[OK] 30-Day Baseline Data Shape: {baseline_30d_df.shape}")
+        print(f"[OK] Hourly Data Shape: {hourly_df.shape}")
+        print(f"[OK] 5-Minute Metrics Data Shape: {metrics_5m_df.shape}")
 
         logger.info("\n" + "=" * 60)
         logger.info("All data fetches completed successfully!")

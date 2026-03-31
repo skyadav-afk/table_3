@@ -54,7 +54,7 @@ ai_baseline_view_2 (14-day baseline) + ai_baseline_stats_30d (30-day delta stats
     ↓
 ai_detector_staging1 (daily/weekly candidates, breach_ratio ≥ 0.4)
     ↓
-Pattern detection: daily_weekly1.py | drift.py | volume1.py | sudden.py
+Pattern detection: daily.py | weekly.py | drift.py | volume1.py | sudden.py
     ↓
 ai_service_behavior_memory (promoted patterns with TTL)
     ↓
@@ -88,6 +88,19 @@ Every pattern script calls `run_log.log_run()` on completion, writing to `ai_pat
 ### Utilities
 
 - `recreate_table.py` — drops and recreates detection tables (use for schema resets, not routine operation)
+
+### Scheduler (`scheduler.py`)
+
+Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline on schedule:
+
+| Trigger | Scripts |
+|---------|---------|
+| Every hour | `sudden.py`, `drift.py` |
+| Daily 00:00 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` → `ai_Probability.py` |
+| Daily 23:00 UTC | `volume1.py` |
+| Weekly Sunday 00:00 | `stagging.py` → `weekly.py` |
+
+GitHub Actions (`.github/workflows/`) mirrors this schedule: `hourly.yml` runs `drift.py` + `sudden.py` in parallel; `daily.yml` runs `stagging.py` then `daily.py` + `volume1.py` in parallel.
 
 ### SQL Setup
 
