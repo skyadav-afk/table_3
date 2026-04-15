@@ -4,105 +4,155 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-AI Service Behavior Detector — analyzes hourly service metrics stored in ClickHouse and classifies anomalous patterns into a behavior memory table. Pattern types: `daily_candidate`, `weekly_candidate`, `drift_up`, `drift_down`, `volume_driven`, `sudden_drop`, `sudden_spike`.
+AI Service Behavior Detector — analyzes hourly service metrics stored in ClickHouse and classifies anomalous patterns into a behavior memory table. Pattern types: `daily`, `weekly`, `drift_up`, `drift_down`, `volume_driven`, `sudden_drop`, `sudden_spike`.
 
 ## Setup
 
 ```bash
-source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# One-time DB setup (only needed on first deployment)
+# One-time DB setup
 python create_run_log.py       # Creates ai_pattern_run_log table
 ```
 
-Dependencies: `pandas`, `numpy`, `clickhouse-connect`, `requests==2.31.0`
-
 ## Running the Pipeline
 
-Scripts are run standalone in this order:
+Scripts run standalone in this order:
 
 ```bash
-# 1. Refresh baseline views (run periodically)
+# 1. Refresh baseline views
 python baseline_view.py        # 14-day rolling baseline → ai_baseline_view_2
 python baseline_stats_30d.py   # 30-day delta stats → ai_baseline_stats_30d
 
 # 2. Generate staging candidates
 python stagging.py             # Populates ai_detector_staging1
 
-# 3. Detect and promote patterns to memory
-python daily.py                # Daily seasonal patterns
-python weekly.py               # Weekly seasonal patterns
-python drift.py                # Gradual drift
-python volume1.py              # Volume-correlated patterns (reads ai_metrics_5m_v2, not hourly table)
-python sudden.py               # Sudden drops/spikes
+# 3. Detect and promote patterns
+python daily.py
+python weekly.py
+python drift.py
+python volume1.py              # Reads ai_metrics_5m_v2, not the hourly table
+python sudden.py
 
-# 4. (Optional) Compute risk scores
-python ai_Probability.py       # Populates ai_probability table
+# 4. (Optional) Risk scores
+python ai_Probability.py       # ai_Probability.py is not yet fully implemented
 ```
 
-To debug data fetching independently, run `python fetch_data.py` — its `main()` exercises all fetch functions and prints row counts.
+To debug data fetching: `python fetch_data.py` — `main()` exercises all fetch functions and prints row counts.
 
 ## Architecture
 
 ### Data Flow
 
 ```
-ai_service_features_hourly (raw hourly metrics, ClickHouse)
+ai_service_features_hourly (raw hourly metrics)
     ↓
-ai_baseline_view_2 (14-day baseline) + ai_baseline_stats_30d (30-day delta stats)
+ai_baseline_view_2 (14-day SQL VIEW) + ai_baseline_stats_30d (30-day delta SQL VIEW)
     ↓
 ai_detector_staging1 (daily/weekly candidates, breach_ratio ≥ 0.4)
     ↓
-Pattern detection: daily.py | weekly.py | drift.py | volume1.py | sudden.py
+daily.py | weekly.py | drift.py | volume1.py | sudden.py
     ↓
 ai_service_behavior_memory (promoted patterns with TTL)
     ↓
-ai_probability (service-level risk scores)
+ai_pattern_run_log (execution log, written by every pattern script)
 ```
 
 ### Key Design Patterns
 
-- **Volume gating**: All detectors filter out services with volume < 30% of median to avoid false positives on sparse data.
+- **Anchor timestamps**: Each script fixes an `anchor` at the start (rather than calling `utcnow()` repeatedly) to prevent execution-delay skew:
+  - `daily.py`, `weekly.py`, `volume1.py`: today at midnight UTC
+  - `drift.py`: current hour UTC
+  - `sudden.py`: previous completed hour UTC (`current_hour - 1h`)
+
+- **Volume gating**: All detectors skip services where hourly volume < 30% of their baseline median (`VOLUME_THRESHOLD = 0.3`).
+
+- **Baseline classification**: Services are classified from `ai_baseline_view_2` before pattern logic runs:
+  - `breach_ratio >= 0.6` → `CHRONIC`
+  - `breach_ratio >= 0.3` → `AT_RISK`
+  - below → `HEALTHY` (skipped by daily/weekly detectors)
+
 - **TTL-based expiration**: Patterns auto-expire per `TTL_DAYS` in `config.py`. `chronic` patterns never expire.
-- **Confidence scoring**: Daily/weekly patterns use a blend of long-term confidence (30-day window) and recency (7-day window) to score quality.
-- **Multi-tenant**: All tables and queries are scoped by `project_id`, `application_id`, `service_id`.
+
+- **day_of_week normalization**: ClickHouse uses ISO format (1=Mon, 7=Sun); pandas uses 0-indexed (0=Mon, 6=Sun). All scripts convert on ingest: `staging_df['day_of_week'] = (staging_df['day_of_week'] - 1) % 7`.
+
+### Shared Helpers (duplicated across pattern scripts)
+
+Every pattern detection script (`daily.py`, `weekly.py`, `drift.py`, `sudden.py`, `volume1.py`) defines these local helpers:
+
+```python
+get_baseline(baseline_df, proj, app, svc, metric)      # → row or None
+get_baseline_30d(baseline_30d_df, proj, app, svc, metric)  # → row or None
+volume_ok(window_volume, median_volume)                 # → bool
+classify_baseline(breach_ratio)                         # → "CHRONIC"|"AT_RISK"|"HEALTHY"
+```
+
+These are intentionally inlined (not shared via import) — modify consistently across all scripts when changing threshold logic.
 
 ### Configuration (`config.py`)
 
-All thresholds live in a single `CONFIG` dict. Key groups:
-- `BASELINE_CHRONIC_THRESHOLD` / `BASELINE_AT_RISK_THRESHOLD` — classify services as `HEALTHY`, `AT_RISK`, or `CHRONIC`
-- `DRIFT_DIRECTION_CONSISTENCY` (0.7) — min directional consistency for drift
-- `VOLUME_SUCCESS_CORRELATION_THRESHOLD` (-0.6) / `VOLUME_LATENCY_CORRELATION_THRESHOLD` (0.6)
-- `SUDDEN_SUCCESS_DROP` (5.0%) / `SUDDEN_LATENCY_SPIKE` (1.0s)
-- `TTL_DAYS` — per-pattern-type expiry in days
+Single `CONFIG` dict imported by every script. Key thresholds:
+
+| Key | Value | Used By |
+|-----|-------|---------|
+| `BASELINE_CHRONIC_THRESHOLD` | 0.6 | All scripts |
+| `BASELINE_AT_RISK_THRESHOLD` | 0.3 | All scripts |
+| `VOLUME_THRESHOLD` | 0.3 | All scripts (volume gate) |
+| `BAD_RATIO_THRESHOLD` | 0.4 | staging + daily/weekly |
+| `DAILY_LONG_TERM_CONFIDENCE_THRESHOLD` | 0.4 | daily.py |
+| `DAILY_LONG_TERM_DAYS` / `DAILY_RECENCY_DAYS` | 30 / 7 | daily.py |
+| `WEEKLY_REPEAT_THRESHOLD` | 0.6 | weekly.py |
+| `DRIFT_DIRECTION_CONSISTENCY` | 0.7 | drift.py |
+| `DRIFT_HOURS` / `DRIFT_MIN_HOURS` | 24 / 12 | drift.py |
+| `SUDDEN_SUCCESS_DROP` | 5.0% | sudden.py |
+| `SUDDEN_LATENCY_SPIKE` | 1.0s | sudden.py |
+| `VOLUME_SUCCESS_CORRELATION_THRESHOLD` | -0.6 | volume1.py |
+| `VOLUME_LATENCY_CORRELATION_THRESHOLD` | 0.6 | volume1.py |
+| `DELTA_MULTIPLIER` | 1.5 | drift.py (chronic noise filter) |
+| `TTL_DAYS` | per-type dict | All pattern scripts |
+
+### Pattern Window Formats
+
+Each pattern type writes a specific `pattern_window` string to `ai_service_behavior_memory`:
+
+| Pattern | Example `pattern_window` |
+|---------|--------------------------|
+| daily | `"Daily 14-15"` |
+| weekly | `"Mon 9-10"` |
+| drift_up / drift_down | `"Last 24h"` |
+| sudden_drop / sudden_spike | `"2025-03-01 14:00"` |
+| volume_driven | `"30 Days"` |
 
 ### ClickHouse Connection
 
-Credentials are hardcoded in each script (host, port 8123, database `metrics`). The `fetch_data.py` module centralizes the connection logic and baseline/staging queries — all detector scripts import from it.
+Credentials are hardcoded in each script (host, port 8123, database `metrics`). `fetch_data.py` centralizes all query logic — all detector scripts import from it. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
 
 ### Run Log
 
-Every pattern script calls `run_log.log_run()` on completion, writing to `ai_pattern_run_log`. Fields: `script_name`, `anchor` (boundary time), `started_at`, `completed_at`, `patterns_written`, `status`, `error_message`.
-
-### Utilities
-
-- `recreate_table.py` — drops and recreates detection tables (use for schema resets, not routine operation)
+Every pattern script calls `run_log.log_run()` at the end of `__main__`, writing to `ai_pattern_run_log`. Fields: `script_name`, `anchor`, `started_at`, `completed_at`, `patterns_written`, `status`, `error_message`.
 
 ### Scheduler (`scheduler.py`)
 
-Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline on schedule:
+Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline:
 
 | Trigger | Scripts |
 |---------|---------|
 | Every hour | `sudden.py`, `drift.py` |
 | Daily 00:00 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` → `ai_Probability.py` |
 | Daily 23:00 UTC | `volume1.py` |
-| Weekly Sunday 00:00 | `stagging.py` → `weekly.py` |
+| Weekly Sunday 00:00 UTC | `stagging.py` → `weekly.py` |
 
-GitHub Actions (`.github/workflows/`) mirrors this schedule: `hourly.yml` runs `drift.py` + `sudden.py` in parallel; `daily.yml` runs `stagging.py` then `daily.py` + `volume1.py` in parallel.
+### GitHub Actions (`.github/workflows/`)
 
-### SQL Setup
+| Workflow | Cron | Jobs |
+|----------|------|------|
+| `hourly.yml` | `0 * * * *` | `drift.py` + `sudden.py` (parallel) |
+| `daily.yml` | `55 23 * * *` | `stagging.py` → `daily.py` + `volume1.py` (parallel) |
+| `weekly.yml` | `55 23 * * 0` | `stagging.py` → `weekly.py` |
 
-- `staging.sql` — creates `ai_detector_staging1`, `ai_baseline_view_2`, and materialized views for candidates
-- `create_memory_table.sql` — creates `ai_service_behavior_memory1` with partitioning and TTL
+Note: GitHub Actions daily runs at 23:55 UTC (end-of-day), while `scheduler.py` runs daily jobs at 00:00 UTC — these are intentionally different schedules.
+
+### Utilities
+
+- `recreate_table.py` — drops and recreates detection tables (use for schema resets only)

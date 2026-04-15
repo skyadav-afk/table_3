@@ -171,6 +171,10 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
         if volume_result is None:
             continue
 
+        # Skip if last_seen data is too old (> 1 day before anchor)
+        if (anchor - volume_result["last_seen"]) > pd.Timedelta(days=1):
+            continue
+
         # --- VOLUME GATE ---
         # Use last N days anchored to scheduled day boundary
         max_date = anchor
