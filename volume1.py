@@ -238,11 +238,13 @@ if __name__ == "__main__":
     from run_log import log_run
 
     CLICKHOUSE_CONFIG = {
-        'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
-        'port': 8123,
+        'host': 'wmsandbox5-clickhouse.watermelon.us',
+        'port': 443,
         'database': 'metrics',
-        'username': 'wm_test',
-        'password': 'Watermelon@123'
+        'username': 'admin',
+        'password': 'W@terlem0n@123#',
+        'secure': True,
+        'verify': False,
     }
     TARGET_TABLE = 'ai_service_behavior_memory'
 
@@ -283,10 +285,6 @@ if __name__ == "__main__":
         print(f"\nFirst 10 patterns:")
         print(volume_df.head(10).to_string())
 
-        output_file = f"volume_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        volume_df.to_csv(output_file, index=False)
-        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
-
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")
         logger.info("=" * 80)
@@ -298,7 +296,9 @@ if __name__ == "__main__":
                 port=CLICKHOUSE_CONFIG['port'],
                 database=CLICKHOUSE_CONFIG['database'],
                 username=CLICKHOUSE_CONFIG['username'],
-                password=CLICKHOUSE_CONFIG['password']
+                password=CLICKHOUSE_CONFIG['password'],
+                secure=CLICKHOUSE_CONFIG['secure'],
+                verify=CLICKHOUSE_CONFIG['verify'],
             )
 
             version = client.command('SELECT version()')
@@ -309,7 +309,7 @@ if __name__ == "__main__":
 
             logger.info(f"[OK] Successfully wrote {len(volume_df)} patterns to {TARGET_TABLE}")
 
-            total_count = client.command(f"SELECT COUNT(*) FROM {TARGET_TABLE} WHERE pattern_type = 'volume_driven'")
+            total_count = client.command(f"SELECT COUNT(*) FROM {TARGET_TABLE} FINAL WHERE pattern_type = 'volume_driven'")
             logger.info(f"[OK] Verified: Total volume_driven patterns in table: {total_count}")
 
             client.close()

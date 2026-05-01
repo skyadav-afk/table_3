@@ -16,11 +16,13 @@ logger = logging.getLogger(__name__)
 
 # ClickHouse connection configuration
 CLICKHOUSE_CONFIG = {
-    'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
-    'port': 8123,
+    'host': 'wmsandbox5-clickhouse.watermelon.us',
+    'port': 443,
     'database': 'metrics',
-    'username': 'wm_test',
-    'password': 'Watermelon@123'
+    'username': 'admin',
+    'password': 'W@terlem0n@123#',
+    'secure': True,
+    'verify': False,
 }
 
 # Drop table SQL
@@ -59,7 +61,9 @@ def create_ai_probability_table():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
         
         # Test connection

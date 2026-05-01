@@ -16,18 +16,20 @@ logger = logging.getLogger(__name__)
 
 # ClickHouse connection configuration
 CLICKHOUSE_CONFIG = {
-    'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
-    'port': 8123,  # HTTP protocol port
+    'host': 'wmsandbox5-clickhouse.watermelon.us',
+    'port': 443,
     'database': 'metrics',
-    'username': 'wm_test',
-    'password': 'Watermelon@123'
+    'username': 'admin',
+    'password': 'W@terlem0n@123#',
+    'secure': True,
+    'verify': False,
 }
 
 TABLE_NAME = 'ai_detector_staging1'
 BASELINE_VIEW = 'ai_baseline_view_2'
 BASELINE_VIEW_30D = 'ai_baseline_stats_30d'
 HOURLY_TABLE = 'ai_service_features_hourly'  # Will try this first, fallback to ai_service_features_hourly
-METRICS_5M_TABLE = 'ai_metrics_5m_v2'  # 5-minute metrics table for volume.py
+METRICS_5M_TABLE = 'ai_metrics_5m'  # 5-minute metrics table for volume.py
 
 
 def fetch_data_to_dataframe():
@@ -46,7 +48,9 @@ def fetch_data_to_dataframe():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
 
         # Test connection
@@ -94,7 +98,9 @@ def fetch_baseline_data():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
 
         # Test connection
@@ -152,7 +158,9 @@ def fetch_baseline_30d_data():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
 
         # Test connection
@@ -200,7 +208,9 @@ def fetch_hourly_data():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
 
         # Test connection
@@ -285,7 +295,9 @@ def fetch_5m_data():
             port=CLICKHOUSE_CONFIG['port'],
             database=CLICKHOUSE_CONFIG['database'],
             username=CLICKHOUSE_CONFIG['username'],
-            password=CLICKHOUSE_CONFIG['password']
+            password=CLICKHOUSE_CONFIG['password'],
+            secure=CLICKHOUSE_CONFIG['secure'],
+            verify=CLICKHOUSE_CONFIG['verify'],
         )
 
         # Test connection

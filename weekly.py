@@ -358,11 +358,13 @@ if __name__ == "__main__":
 
     # ClickHouse connection configuration
     CLICKHOUSE_CONFIG = {
-        'host': 'ec2-47-129-241-41.ap-southeast-1.compute.amazonaws.com',
-        'port': 8123,
+        'host': 'wmsandbox5-clickhouse.watermelon.us',
+        'port': 443,
         'database': 'metrics',
-        'username': 'wm_test',
-        'password': 'Watermelon@123'
+        'username': 'admin',
+        'password': 'W@terlem0n@123#',
+        'secure': True,
+        'verify': False,
     }
     TARGET_TABLE = 'ai_service_behavior_memory'
 
@@ -413,11 +415,6 @@ if __name__ == "__main__":
         print(f"\n\nFirst 10 patterns:")
         print(weekly_df.head(10).to_string())
 
-        # Save to CSV backup
-        output_file = f"weekly_patterns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        weekly_df.to_csv(output_file, index=False)
-        print(f"\n[SAVED] Backup CSV saved to: {output_file}")
-
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")
@@ -430,15 +427,13 @@ if __name__ == "__main__":
                 port=CLICKHOUSE_CONFIG['port'],
                 database=CLICKHOUSE_CONFIG['database'],
                 username=CLICKHOUSE_CONFIG['username'],
-                password=CLICKHOUSE_CONFIG['password']
+                password=CLICKHOUSE_CONFIG['password'],
+                secure=CLICKHOUSE_CONFIG['secure'],
+                verify=CLICKHOUSE_CONFIG['verify'],
             )
 
             version = client.command('SELECT version()')
             logger.info(f"[OK] Connected to ClickHouse version: {version}")
-
-            logger.info(f"\nDeleting existing weekly patterns from {TARGET_TABLE}...")
-            client.command(f"ALTER TABLE {TARGET_TABLE} DELETE WHERE pattern_type = 'weekly'")
-            logger.info("[OK] Existing weekly patterns deleted")
 
             logger.info(f"\nInserting {len(weekly_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, weekly_df)

@@ -110,7 +110,20 @@ Single `CONFIG` dict imported by every script. Key thresholds:
 | `VOLUME_SUCCESS_CORRELATION_THRESHOLD` | -0.6 | volume1.py |
 | `VOLUME_LATENCY_CORRELATION_THRESHOLD` | 0.6 | volume1.py |
 | `DELTA_MULTIPLIER` | 1.5 | drift.py (chronic noise filter) |
-| `TTL_DAYS` | per-type dict | All pattern scripts |
+| `MIN_SUPPORT` | 3 | daily.py, weekly.py, drift.py |
+| `CONFIDENCE_DECAY` | 0.9 | daily.py, weekly.py |
+| `TTL_DAYS` | per-type dict (see below) | All pattern scripts |
+
+TTL values by pattern type:
+
+| Pattern type | TTL (days) |
+|---|---|
+| `daily_seasonal` | 45 |
+| `weekly_seasonal` | 90 |
+| `drift_up` / `drift_down` | 14 |
+| `sudden_drop` / `sudden_spike` | 3 |
+| `volume_pattern` | 30 |
+| `chronic` | never expires (`None`) |
 
 ### Pattern Window Formats
 
@@ -124,9 +137,25 @@ Each pattern type writes a specific `pattern_window` string to `ai_service_behav
 | sudden_drop / sudden_spike | `"2025-03-01 14:00"` |
 | volume_driven | `"30 Days"` |
 
+### Data Fetching (`fetch_data.py`)
+
+All detector scripts import from `fetch_data.py`. Exported functions (all return pandas DataFrames):
+
+| Function | Source table/view |
+|---|---|
+| `fetch_data_to_dataframe()` | `ai_detector_staging1` |
+| `fetch_baseline_data()` | `ai_baseline_view_2` |
+| `fetch_baseline_30d_data()` | `ai_baseline_stats_30d` |
+| `fetch_hourly_data()` | `ai_service_features_hourly` (with fallback table logic) |
+| `fetch_5m_data()` | `ai_metrics_5m_v2` (used only by `volume1.py`) |
+
 ### ClickHouse Connection
 
-Credentials are hardcoded in each script (host, port 8123, database `metrics`). `fetch_data.py` centralizes all query logic — all detector scripts import from it. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
+The canonical credentials dict (`CLICKHOUSE_CONFIG`) lives in `fetch_data.py`. However, `baseline_view.py`, `baseline_stats_30d.py`, `run_log.py`, and `create_run_log.py` each hardcode their own connection — update all locations when credentials change. Host: port 8123, database `metrics`. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
+
+### Testing
+
+There is no test suite in this repository — no pytest/unittest configuration or test files exist.
 
 ### Run Log
 
