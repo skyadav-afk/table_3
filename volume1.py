@@ -238,7 +238,7 @@ if __name__ == "__main__":
     from run_log import log_run
 
     CLICKHOUSE_CONFIG = {
-        'host': 'wmsandbox5-clickhouse.watermelon.us',
+        'host': 'wmsandbox1-clickhouse.watermelon.us',
         'port': 443,
         'database': 'metrics',
         'username': 'admin',
@@ -306,6 +306,8 @@ if __name__ == "__main__":
 
             logger.info(f"\nInserting {len(volume_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, volume_df)
+            client.command('OPTIMIZE TABLE ai_service_behavior_memory FINAL')
+            logger.info("[OK] Forced merge complete — duplicates collapsed")
 
             logger.info(f"[OK] Successfully wrote {len(volume_df)} patterns to {TARGET_TABLE}")
 

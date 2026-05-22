@@ -276,7 +276,7 @@ if __name__ == "__main__":
 
     # ClickHouse connection configuration
     CLICKHOUSE_CONFIG = {
-        'host': 'wmsandbox5-clickhouse.watermelon.us',
+        'host': 'wmsandbox1-clickhouse.watermelon.us',
         'port': 443,
         'database': 'metrics',
         'username': 'admin',
@@ -354,6 +354,8 @@ if __name__ == "__main__":
 
             logger.info(f"\nInserting {len(drift_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, drift_df)
+            client.command('OPTIMIZE TABLE ai_service_behavior_memory FINAL')
+            logger.info("[OK] Forced merge complete — duplicates collapsed")
 
             logger.info(f"[OK] Successfully wrote {len(drift_df)} drift patterns to {TARGET_TABLE}")
 

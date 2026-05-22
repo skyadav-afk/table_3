@@ -9,7 +9,7 @@ import logging
 import clickhouse_connect
 
 CLICKHOUSE_CONFIG = {
-    'host': 'wmsandbox5-clickhouse.watermelon.us',
+    'host': 'wmsandbox1-clickhouse.watermelon.us',
     'port': 443,
     'database': 'metrics',
     'username': 'admin',
