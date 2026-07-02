@@ -212,17 +212,8 @@ if __name__ == "__main__":
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
     from run_log import log_run
+    from db_config import CLICKHOUSE_CONFIG
 
-    # ClickHouse connection configuration
-    CLICKHOUSE_CONFIG = {
-        'host': 'wmsandbox1-clickhouse.watermelon.us',
-        'port': 443,
-        'database': 'metrics',
-        'username': 'admin',
-        'password': 'W@terlem0n@123#',
-        'secure': True,
-        'verify': False,
-    }
     TARGET_TABLE = 'ai_service_behavior_memory'
 
     # Configure logging

@@ -6,15 +6,7 @@ Import and call log_run() at the end of each pattern script's __main__.
 import clickhouse_connect
 from datetime import datetime
 
-CLICKHOUSE_CONFIG = {
-    'host': 'wmsandbox1-clickhouse.watermelon.us',
-    'port': 443,
-    'database': 'metrics',
-    'username': 'admin',
-    'password': 'W@terlem0n@123#',
-    'secure': True,
-    'verify': False,
-}
+from db_config import CLICKHOUSE_CONFIG
 
 TARGET_TABLE = 'metrics.ai_pattern_run_log'
 

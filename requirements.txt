@@ -3,4 +3,5 @@ pandas
 numpy
 clickhouse-connect
 schedule
+python-dotenv
 

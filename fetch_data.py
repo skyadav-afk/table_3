@@ -14,16 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ClickHouse connection configuration
-CLICKHOUSE_CONFIG = {
-    'host': 'wmsandbox1-clickhouse.watermelon.us',
-    'port': 443,
-    'database': 'metrics',
-    'username': 'admin',
-    'password': 'W@terlem0n@123#',
-    'secure': True,
-    'verify': False,
-}
+from db_config import CLICKHOUSE_CONFIG
 
 TABLE_NAME = 'ai_detector_staging1'
 BASELINE_VIEW = 'ai_baseline_view_2'

@@ -14,16 +14,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ClickHouse connection configuration
-CLICKHOUSE_CONFIG = {
-    'host': 'wmsandbox1-clickhouse.watermelon.us',
-    'port': 443,
-    'database': 'metrics',
-    'username': 'admin',
-    'password': 'W@terlem0n@123#',
-    'secure': True,
-    'verify': False,
-}
+from db_config import CLICKHOUSE_CONFIG
 
 # Drop table SQL
 DROP_TABLE_SQL = "DROP TABLE IF EXISTS ai_probability"

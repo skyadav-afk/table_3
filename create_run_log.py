@@ -6,15 +6,7 @@ Run once at setup - tracks every pattern script execution.
 import logging
 import clickhouse_connect
 
-CLICKHOUSE_CONFIG = {
-    'host': 'wmsandbox1-clickhouse.watermelon.us',
-    'port': 443,
-    'database': 'metrics',
-    'username': 'admin',
-    'password': 'W@terlem0n@123#',
-    'secure': True,
-    'verify': False,
-}
+from db_config import CLICKHOUSE_CONFIG
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

@@ -12,7 +12,11 @@ AI Service Behavior Detector — analyzes hourly service metrics stored in Click
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
+# Configure ClickHouse credentials
+cp .env.example .env           # then fill in real host/username/password
+
 # One-time DB setup
+python create_tables.py        # Creates ai_service_behavior_memory + ai_detector_staging1
 python create_run_log.py       # Creates ai_pattern_run_log table
 ```
 
@@ -151,7 +155,7 @@ All detector scripts import from `fetch_data.py`. Exported functions (all return
 
 ### ClickHouse Connection
 
-The canonical credentials dict (`CLICKHOUSE_CONFIG`) lives in `fetch_data.py`. However, `baseline_view.py`, `baseline_stats_30d.py`, `run_log.py`, and `create_run_log.py` each hardcode their own connection — update all locations when credentials change. Host: port 8123, database `metrics`. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
+`CLICKHOUSE_CONFIG` is built once in `db_config.py` from environment variables (loaded via `python-dotenv` from a local `.env` file) and imported by every script that needs it — no script hardcodes credentials. Required vars: `CLICKHOUSE_HOST`, `CLICKHOUSE_USERNAME`, `CLICKHOUSE_PASSWORD` (script raises `KeyError` if missing); optional with defaults: `CLICKHOUSE_PORT` (443), `CLICKHOUSE_DATABASE` (metrics), `CLICKHOUSE_SECURE` (true), `CLICKHOUSE_VERIFY` (false). See `.env.example` for the template — copy it to `.env` and fill in real values; `.env` is gitignored. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
 
 ### Testing
 
@@ -184,4 +188,4 @@ Note: GitHub Actions daily runs at 23:55 UTC (end-of-day), while `scheduler.py` 
 
 ### Utilities
 
-- `recreate_table.py` — drops and recreates detection tables (use for schema resets only)
+- `create_tables.py` — one-time setup; `CREATE TABLE IF NOT EXISTS` for `ai_service_behavior_memory` and `ai_detector_staging1` (does not drop/reset existing tables)
