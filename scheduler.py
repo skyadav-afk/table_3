@@ -97,11 +97,22 @@ def weekly_job():
 # ---------------------------------------------------------------------------
 
 def main():
-    logger.info("Scheduler starting - running initial hourly + daily jobs")
+    logger.info("Scheduler starting - running one-time table setup")
 
-    # Run once immediately on startup so the container is useful right away
-    hourly_job()
+    # One-time setup: CREATE TABLE IF NOT EXISTS, safe to run every process start
+    ok = run_script("create_tables.py")
+    if not ok:
+        logger.error("create_tables.py failed - aborting startup")
+        return
+    run_script("create_run_log.py")
+
+    # Run once immediately on startup so the container is useful right away.
+    # daily_job runs first since it creates ai_baseline_view_2 (via baseline_view.py),
+    # which sudden.py/drift.py in hourly_job depend on - running hourly_job first would
+    # fail on a fresh process before that view exists.
+    logger.info("Running initial daily + hourly jobs")
     daily_job()
+    hourly_job()
 
     # Recurring schedule
     schedule.every().hour.do(hourly_job)
