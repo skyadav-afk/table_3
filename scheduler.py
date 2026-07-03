@@ -6,9 +6,16 @@ Run this as the entrypoint in a Docker container or pod:
 
 Schedule:
   - Every hour        : sudden.py, drift.py
-  - Daily at 00:00    : baseline refresh -> stagging -> daily.py
-  - Daily at 23:00    : volume1.py (end-of-day full-day data)
+  - Daily at 00:35    : baseline refresh -> stagging -> daily.py
+  - Daily at 23:35    : volume1.py (end-of-day full-day data)
   - Weekly (Sunday)   : stagging.py -> weekly.py
+
+Note: daily/eod/weekly jobs run 35 minutes past the boundary hour, not exactly
+on it. ai_service_features_hourly ingestion lags ~30 min behind the wall clock,
+so a job firing exactly at 00:00/23:00 would query before the boundary hour's
+row has landed - e.g. daily_job at 00:00 would miss the previous day's 23:00
+ts_hour row (which lands ~00:30), delaying MIN_SUPPORT-based promotion by a
+full day. The 35-min offset gives a 5-minute buffer past that lag.
 
 Note: ai_Probability.py is intentionally NOT scheduled here - it drops and
 recreates the ai_probability table empty on every run with no scoring logic
@@ -62,7 +69,7 @@ def hourly_job():
 
 
 def daily_job():
-    """Daily at 00:00: refresh baselines, stage candidates, run daily patterns."""
+    """Daily at 00:35: refresh baselines, stage candidates, run daily patterns."""
     logger.info("=== Daily job: baseline -> staging -> daily ===")
     ok = run_script("baseline_view.py")
     if not ok:
@@ -77,13 +84,13 @@ def daily_job():
 
 
 def eod_job():
-    """Daily at 23:00: volume detection (needs full day of data)."""
+    """Daily at 23:35: volume detection (needs full day of data)."""
     logger.info("=== End-of-day job: volume ===")
     run_script("volume1.py")
 
 
 def weekly_job():
-    """Weekly on Sunday 00:00: re-stage and run weekly pattern detection."""
+    """Weekly on Sunday 00:35: re-stage and run weekly pattern detection."""
     logger.info("=== Weekly job: staging -> weekly ===")
     ok = run_script("stagging.py")
     if not ok:
@@ -114,15 +121,15 @@ def main():
     daily_job()
     hourly_job()
 
-    # Recurring schedule
+    # Recurring schedule (00:35/23:35 - see module docstring for the ingestion-lag reason)
     schedule.every().hour.do(hourly_job)
-    schedule.every().day.at("00:00").do(daily_job)
-    schedule.every().day.at("23:00").do(eod_job)
-    schedule.every().sunday.at("00:00").do(weekly_job)
+    schedule.every().day.at("00:35").do(daily_job)
+    schedule.every().day.at("23:35").do(eod_job)
+    schedule.every().sunday.at("00:35").do(weekly_job)
 
     logger.info(
-        "Scheduled: hourly (sudden+drift) | 00:00 daily (baseline+staging+daily) "
-        "| 23:00 daily (volume) | Sunday 00:00 (weekly)"
+        "Scheduled: hourly (sudden+drift) | 00:35 daily (baseline+staging+daily) "
+        "| 23:35 daily (volume) | Sunday 00:35 (weekly)"
     )
 
     while True:

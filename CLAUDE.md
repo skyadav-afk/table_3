@@ -188,9 +188,11 @@ Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline:
 | Trigger | Scripts |
 |---------|---------|
 | Every hour | `sudden.py`, `drift.py` |
-| Daily 00:00 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` |
-| Daily 23:00 UTC | `volume1.py` |
-| Weekly Sunday 00:00 UTC | `stagging.py` → `weekly.py` |
+| Daily 00:35 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` |
+| Daily 23:35 UTC | `volume1.py` |
+| Weekly Sunday 00:35 UTC | `stagging.py` → `weekly.py` |
+
+Daily/eod/weekly jobs run 35 minutes past the boundary hour rather than exactly on it: `ai_service_features_hourly` ingestion lags ~30 min behind the wall clock, so a job firing exactly at `00:00`/`23:00` would query before the boundary hour's row has landed (e.g. `daily_job` at `00:00` would miss the previous day's `23:00` `ts_hour` row, delaying `MIN_SUPPORT`-based pattern promotion by a full day). The 35-min offset gives a 5-minute buffer past that lag.
 
 ### GitHub Actions (`.github/workflows/`)
 
@@ -200,7 +202,7 @@ Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline:
 | `daily.yml` | `55 23 * * *` | `stagging.py` → `daily.py` + `volume1.py` (parallel) |
 | `weekly.yml` | `55 23 * * 0` | `stagging.py` → `weekly.py` |
 
-Note: GitHub Actions daily runs at 23:55 UTC (end-of-day), while `scheduler.py` runs daily jobs at 00:00 UTC — these are intentionally different schedules.
+Note: GitHub Actions daily runs at 23:55 UTC (end-of-day), while `scheduler.py` runs daily jobs at 00:35 UTC — these are intentionally different schedules.
 
 ### Utilities
 
