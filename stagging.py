@@ -9,13 +9,18 @@ up-to-date pattern candidates based on the latest hourly data.
 import logging
 import clickhouse_connect
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-DAILY_CANDIDATE_SQL = """
-INSERT INTO metrics.ai_detector_staging1
+DB = CLICKHOUSE_CONFIG['database']
+STAGING = f"{DB}.{TABLES['staging']}"
+HOURLY = f"{DB}.{TABLES['hourly']}"
+BASELINE_VIEW = f"{DB}.{TABLES['baseline_view']}"
+
+DAILY_CANDIDATE_SQL = f"""
+INSERT INTO {STAGING}
 SELECT
     f.project_id,
     f.application_id,
@@ -36,13 +41,13 @@ SELECT
     toUInt32(f.total_requests)                                    AS total_requests,
     f.ts_hour,
     now()                                                         AS detected_at
-FROM metrics.ai_service_features_hourly f
-JOIN metrics.ai_baseline_view_2 b USING (project_id, application_id, service, metric)
+FROM {HOURLY} f
+JOIN {BASELINE_VIEW} b USING (project_id, application_id, service, metric)
 WHERE f.breach_ratio >= 0.4
 """
 
-WEEKLY_CANDIDATE_SQL = """
-INSERT INTO metrics.ai_detector_staging1
+WEEKLY_CANDIDATE_SQL = f"""
+INSERT INTO {STAGING}
 SELECT
     f.project_id,
     f.application_id,
@@ -66,15 +71,15 @@ SELECT
     toUInt32(f.total_requests)                                   AS total_requests,
     f.ts_hour,
     now()                                                        AS detected_at
-FROM metrics.ai_service_features_hourly f
-JOIN metrics.ai_baseline_view_2 b USING (project_id, application_id, service, metric)
+FROM {HOURLY} f
+JOIN {BASELINE_VIEW} b USING (project_id, application_id, service, metric)
 WHERE f.breach_ratio >= 0.4
 """
 
 
 def main():
     logger.info("=" * 70)
-    logger.info("UPDATE ai_detector_staging1")
+    logger.info(f"UPDATE {TABLES['staging']}")
     logger.info("=" * 70)
 
     client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
@@ -82,15 +87,15 @@ def main():
     logger.info(f"Connected to ClickHouse {version}")
 
     # Truncate staging table for a clean refresh
-    logger.info("\nTruncating ai_detector_staging1...")
-    client.command('TRUNCATE TABLE metrics.ai_detector_staging1')
+    logger.info(f"\nTruncating {TABLES['staging']}...")
+    client.command(f'TRUNCATE TABLE {STAGING}')
     logger.info("[OK] Table truncated")
 
     # Insert daily candidates
     logger.info("\nInserting daily candidates...")
     client.command(DAILY_CANDIDATE_SQL)
     daily_count = client.command(
-        "SELECT count() FROM metrics.ai_detector_staging1 WHERE pattern_type = 'daily_candidate'"
+        f"SELECT count() FROM {STAGING} WHERE pattern_type = 'daily_candidate'"
     )
     logger.info(f"[OK] Daily candidates inserted: {daily_count}")
 
@@ -98,12 +103,12 @@ def main():
     logger.info("\nInserting weekly candidates...")
     client.command(WEEKLY_CANDIDATE_SQL)
     weekly_count = client.command(
-        "SELECT count() FROM metrics.ai_detector_staging1 WHERE pattern_type = 'weekly_candidate'"
+        f"SELECT count() FROM {STAGING} WHERE pattern_type = 'weekly_candidate'"
     )
     logger.info(f"[OK] Weekly candidates inserted: {weekly_count}")
 
-    total = client.command("SELECT count() FROM metrics.ai_detector_staging1")
-    logger.info(f"\n[OK] Total rows in ai_detector_staging1: {total}")
+    total = client.command(f"SELECT count() FROM {STAGING}")
+    logger.info(f"\n[OK] Total rows in {TABLES['staging']}: {total}")
     logger.info(f"  - daily_candidate : {daily_count}")
     logger.info(f"  - weekly_candidate: {weekly_count}")
 
@@ -111,7 +116,7 @@ def main():
     logger.info("\nSample rows:")
     result = client.query(
         "SELECT pattern_type, day_of_week, hour, count() as cnt "
-        "FROM metrics.ai_detector_staging1 "
+        f"FROM {STAGING} "
         "GROUP BY pattern_type, day_of_week, hour "
         "ORDER BY pattern_type, day_of_week, hour "
         "LIMIT 10"
@@ -122,7 +127,7 @@ def main():
         print(f"{row[0]:<20} {row[1]:>12} {row[2]:>6} {row[3]:>8}")
 
     client.close()
-    logger.info("\n[OK] Done. ai_detector_staging1 is up to date.")
+    logger.info(f"\n[OK] Done. {TABLES['staging']} is up to date.")
 
 
 if __name__ == "__main__":

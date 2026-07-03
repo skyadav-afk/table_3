@@ -6,9 +6,13 @@ Run this as the entrypoint in a Docker container or pod:
 
 Schedule:
   - Every hour        : sudden.py, drift.py
-  - Daily at 00:00    : baseline refresh -> stagging -> daily.py -> ai_Probability.py
+  - Daily at 00:00    : baseline refresh -> stagging -> daily.py
   - Daily at 23:00    : volume1.py (end-of-day full-day data)
   - Weekly (Sunday)   : stagging.py -> weekly.py
+
+Note: ai_Probability.py is intentionally NOT scheduled here - it drops and
+recreates the ai_probability table empty on every run with no scoring logic
+implemented yet. Run it standalone only when that's ready.
 """
 
 import subprocess
@@ -58,8 +62,8 @@ def hourly_job():
 
 
 def daily_job():
-    """Daily at 00:00: refresh baselines, stage candidates, run daily patterns, score risk."""
-    logger.info("=== Daily job: baseline -> staging -> daily -> probability ===")
+    """Daily at 00:00: refresh baselines, stage candidates, run daily patterns."""
+    logger.info("=== Daily job: baseline -> staging -> daily ===")
     ok = run_script("baseline_view.py")
     if not ok:
         logger.error("baseline_view.py failed - aborting daily job")
@@ -70,7 +74,6 @@ def daily_job():
         logger.error("stagging.py failed - skipping daily.py")
         return
     run_script("daily.py")
-    run_script("ai_Probability.py")
 
 
 def eod_job():
@@ -107,7 +110,7 @@ def main():
     schedule.every().sunday.at("00:00").do(weekly_job)
 
     logger.info(
-        "Scheduled: hourly (sudden+drift) | 00:00 daily (baseline+staging+daily+prob) "
+        "Scheduled: hourly (sudden+drift) | 00:00 daily (baseline+staging+daily) "
         "| 23:00 daily (volume) | Sunday 00:00 (weekly)"
     )
 

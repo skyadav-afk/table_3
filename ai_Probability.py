@@ -14,14 +14,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
+
+PROBABILITY_TABLE = TABLES['probability']
 
 # Drop table SQL
-DROP_TABLE_SQL = "DROP TABLE IF EXISTS ai_probability"
+DROP_TABLE_SQL = f"DROP TABLE IF EXISTS {PROBABILITY_TABLE}"
 
 # Create table SQL
-CREATE_TABLE_SQL = """
-CREATE TABLE ai_probability
+CREATE_TABLE_SQL = f"""
+CREATE TABLE {PROBABILITY_TABLE}
 (
     service String,
     service_id UInt32,
@@ -42,7 +44,7 @@ def create_ai_probability_table():
     """Drop and recreate the ai_probability table and insert sample data"""
     try:
         logger.info("=" * 80)
-        logger.info("Initializing ai_probability Table")
+        logger.info(f"Initializing {PROBABILITY_TABLE} Table")
         logger.info("=" * 80)
         
         # Connect to ClickHouse
@@ -79,7 +81,7 @@ def create_ai_probability_table():
         
         # Verify table structure
         logger.info("\nVerifying table structure...")
-        result = client.query("DESCRIBE TABLE ai_probability")
+        result = client.query(f"DESCRIBE TABLE {PROBABILITY_TABLE}")
         
         logger.info("\n[OK] Table Structure:")
         logger.info("-" * 80)

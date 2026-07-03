@@ -36,11 +36,11 @@ python stagging.py             # Populates ai_detector_staging1
 python daily.py
 python weekly.py
 python drift.py
-python volume1.py              # Reads ai_metrics_5m_v2, not the hourly table
+python volume1.py              # Reads ai_metrics_5m, not the hourly table
 python sudden.py
 
 # 4. (Optional) Risk scores
-python ai_Probability.py       # ai_Probability.py is not yet fully implemented
+python ai_Probability.py       # CAUTION: drops and recreates ai_probability EMPTY on every run — no scoring logic implemented yet
 ```
 
 To debug data fetching: `python fetch_data.py` — `main()` exercises all fetch functions and prints row counts.
@@ -65,10 +65,9 @@ ai_pattern_run_log (execution log, written by every pattern script)
 
 ### Key Design Patterns
 
-- **Anchor timestamps**: Each script fixes an `anchor` at the start (rather than calling `utcnow()` repeatedly) to prevent execution-delay skew:
+- **Anchor timestamps**: Each script fixes an `anchor` once (rather than calling `utcnow()` repeatedly) to prevent execution-delay skew:
   - `daily.py`, `weekly.py`, `volume1.py`: today at midnight UTC
-  - `drift.py`: current hour UTC
-  - `sudden.py`: previous completed hour UTC (`current_hour - 1h`)
+  - `drift.py`, `sudden.py`: the latest `ts_hour` actually present in the fetched hourly data (`hourly_df['ts_hour'].max()`), falling back to wall-clock hour boundary only if `hourly_df` is empty. This avoids a real bug: anchoring to wall-clock time meant that if `ai_service_features_hourly` ingestion lags behind real time, the anchor hour's row wouldn't exist yet — `sudden.py` does an exact `ts_hour == anchor` match, so a lagged anchor silently produced 0 patterns for that hour and it was never rechecked (next run's anchor moves forward). `drift.py` is less exposed since it uses a 24h range and only needs 12 hours present, but anchors the same way for consistency.
 
 - **Volume gating**: All detectors skip services where hourly volume < 30% of their baseline median (`VOLUME_THRESHOLD = 0.3`).
 
@@ -150,12 +149,29 @@ All detector scripts import from `fetch_data.py`. Exported functions (all return
 | `fetch_data_to_dataframe()` | `ai_detector_staging1` |
 | `fetch_baseline_data()` | `ai_baseline_view_2` |
 | `fetch_baseline_30d_data()` | `ai_baseline_stats_30d` |
-| `fetch_hourly_data()` | `ai_service_features_hourly` (with fallback table logic) |
-| `fetch_5m_data()` | `ai_metrics_5m_v2` (used only by `volume1.py`) |
+| `fetch_hourly_data()` | `ai_service_features_hourly` |
+| `fetch_5m_data()` | `ai_metrics_5m` (used only by `volume1.py`) |
 
 ### ClickHouse Connection
 
 `CLICKHOUSE_CONFIG` is built once in `db_config.py` from environment variables (loaded via `python-dotenv` from a local `.env` file) and imported by every script that needs it — no script hardcodes credentials. Required vars: `CLICKHOUSE_HOST`, `CLICKHOUSE_USERNAME`, `CLICKHOUSE_PASSWORD` (script raises `KeyError` if missing); optional with defaults: `CLICKHOUSE_PORT` (443), `CLICKHOUSE_DATABASE` (metrics), `CLICKHOUSE_SECURE` (true), `CLICKHOUSE_VERIFY` (false). See `.env.example` for the template — copy it to `.env` and fill in real values; `.env` is gitignored. `baseline_view.py` and `baseline_stats_30d.py` create SQL `VIEW`s (not materialized tables).
+
+### Table Names (`db_config.py`)
+
+`TABLES` is a dict in `db_config.py`, alongside `CLICKHOUSE_CONFIG`, mapping logical names to actual table/view names — every script imports it instead of hardcoding table names in SQL. Each entry is `.env`-overridable (`TABLE_<NAME>`, e.g. `TABLE_HOURLY`) and defaults to the current schema name if unset, so a stock checkout needs no `.env` changes for this to work:
+
+| `TABLES` key | Default value | `.env` override |
+|---|---|---|
+| `behavior_memory` | `ai_service_behavior_memory` | `TABLE_BEHAVIOR_MEMORY` |
+| `staging` | `ai_detector_staging1` | `TABLE_STAGING` |
+| `baseline_view` | `ai_baseline_view_2` | `TABLE_BASELINE_VIEW` |
+| `baseline_stats_30d` | `ai_baseline_stats_30d` | `TABLE_BASELINE_STATS_30D` |
+| `hourly` | `ai_service_features_hourly` | `TABLE_HOURLY` |
+| `metrics_5m` | `ai_metrics_5m` | `TABLE_METRICS_5M` |
+| `run_log` | `ai_pattern_run_log` | `TABLE_RUN_LOG` |
+| `probability` | `ai_probability` | `TABLE_PROBABILITY` |
+
+When adding a new table, add it to `TABLES` (and `.env.example`) rather than hardcoding the name in a script.
 
 ### Testing
 
@@ -172,7 +188,7 @@ Runs as a long-lived process (`python scheduler.py`). Orchestrates the pipeline:
 | Trigger | Scripts |
 |---------|---------|
 | Every hour | `sudden.py`, `drift.py` |
-| Daily 00:00 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` → `ai_Probability.py` |
+| Daily 00:00 UTC | `baseline_view.py` → `baseline_stats_30d.py` → `stagging.py` → `daily.py` |
 | Daily 23:00 UTC | `volume1.py` |
 | Weekly Sunday 00:00 UTC | `stagging.py` → `weekly.py` |
 
@@ -189,3 +205,4 @@ Note: GitHub Actions daily runs at 23:55 UTC (end-of-day), while `scheduler.py` 
 ### Utilities
 
 - `create_tables.py` — one-time setup; `CREATE TABLE IF NOT EXISTS` for `ai_service_behavior_memory` and `ai_detector_staging1` (does not drop/reset existing tables)
+- `ai_Probability.py` — unlike every other script here, this unconditionally runs `DROP TABLE IF EXISTS ai_probability` then recreates it empty; it does not compute or insert any risk scores. It is intentionally **not** wired into `scheduler.py` (removed from the daily job) — run it standalone only, and do not re-add it to any scheduled job without first removing the drop and implementing real scoring logic.

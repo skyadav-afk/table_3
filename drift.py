@@ -273,9 +273,9 @@ if __name__ == "__main__":
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
     from run_log import log_run
-    from db_config import CLICKHOUSE_CONFIG
+    from db_config import CLICKHOUSE_CONFIG, TABLES
 
-    TARGET_TABLE = 'ai_service_behavior_memory'
+    TARGET_TABLE = TABLES['behavior_memory']
 
     # Configure logging
     logging.basicConfig(
@@ -299,9 +299,14 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to current hour boundary - any GitHub Actions delay is ignored
-    anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
-    logger.info(f"\nAnchor (hour boundary): {anchor}")
+    # Anchor to the latest hour actually present in the hourly table, not wall-clock
+    # time - keeps the 24h drift window aligned with real data even if ingestion lags.
+    if len(hourly_df) > 0 and hourly_df['ts_hour'].notna().any():
+        anchor = hourly_df['ts_hour'].max().to_pydatetime()
+    else:
+        anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        logger.warning("No hourly data available - falling back to wall-clock anchor")
+    logger.info(f"\nAnchor (latest hour present in hourly data): {anchor}")
 
     # Run drift pattern detection
     logger.info("\n" + "=" * 80)
@@ -345,7 +350,7 @@ if __name__ == "__main__":
 
             logger.info(f"\nInserting {len(drift_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, drift_df)
-            client.command('OPTIMIZE TABLE ai_service_behavior_memory FINAL')
+            client.command(f'OPTIMIZE TABLE {TARGET_TABLE} FINAL')
             logger.info("[OK] Forced merge complete — duplicates collapsed")
 
             logger.info(f"[OK] Successfully wrote {len(drift_df)} drift patterns to {TARGET_TABLE}")

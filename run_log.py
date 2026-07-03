@@ -6,9 +6,9 @@ Import and call log_run() at the end of each pattern script's __main__.
 import clickhouse_connect
 from datetime import datetime
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
-TARGET_TABLE = 'metrics.ai_pattern_run_log'
+TARGET_TABLE = f"{CLICKHOUSE_CONFIG['database']}.{TABLES['run_log']}"
 
 
 def log_run(script_name, anchor, started_at, patterns_written, status, error_message=''):

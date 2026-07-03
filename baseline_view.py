@@ -8,13 +8,17 @@ Run this script to verify the baseline view is correct and up to date.
 import logging
 import clickhouse_connect
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-CREATE_VIEW_SQL = """
-CREATE OR REPLACE VIEW metrics.ai_baseline_view_2 AS
+DB = CLICKHOUSE_CONFIG['database']
+VIEW = f"{DB}.{TABLES['baseline_view']}"
+HOURLY = f"{DB}.{TABLES['hourly']}"
+
+CREATE_VIEW_SQL = f"""
+CREATE OR REPLACE VIEW {VIEW} AS
 SELECT
     project_id,
     application_id,
@@ -33,9 +37,9 @@ SELECT
         WHEN metric = 'latency'      THEN quantile(0.5)(total_requests)
     END AS median_hour_volumne,
     sum(bad_windows) / sum(total_windows) AS breach_ratio
-FROM metrics.ai_service_features_hourly
+FROM {HOURLY}
 WHERE ts_hour >= (
-    SELECT MAX(ts_hour) FROM metrics.ai_service_features_hourly
+    SELECT MAX(ts_hour) FROM {HOURLY}
 ) - INTERVAL 14 DAY
 GROUP BY project_id, application_id, service, metric
 """
@@ -43,7 +47,7 @@ GROUP BY project_id, application_id, service, metric
 
 def main():
     logger.info("=" * 70)
-    logger.info("UPDATE ai_baseline_view_2")
+    logger.info(f"UPDATE {TABLES['baseline_view']}")
     logger.info("=" * 70)
 
     client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
@@ -51,19 +55,19 @@ def main():
     logger.info(f"Connected to ClickHouse {version}")
 
     # Recreate the view (picks up any definition changes)
-    logger.info("\nRecreating ai_baseline_view_2...")
+    logger.info(f"\nRecreating {TABLES['baseline_view']}...")
     client.command(CREATE_VIEW_SQL)
     logger.info("[OK] View recreated")
 
     # Check the date range being used
-    max_ts = client.command("SELECT MAX(ts_hour) FROM metrics.ai_service_features_hourly")
+    max_ts = client.command(f"SELECT MAX(ts_hour) FROM {HOURLY}")
     min_ts = client.command(
-        "SELECT MAX(ts_hour) - INTERVAL 14 DAY FROM metrics.ai_service_features_hourly"
+        f"SELECT MAX(ts_hour) - INTERVAL 14 DAY FROM {HOURLY}"
     )
     logger.info(f"\nHourly data window: {min_ts}  ->  {max_ts}")
 
     # Total rows in the view
-    total = client.command("SELECT count() FROM metrics.ai_baseline_view_2")
+    total = client.command(f"SELECT count() FROM {VIEW}")
     logger.info(f"Total rows in view: {total}")
 
     # Breakdown by metric
@@ -71,7 +75,7 @@ def main():
         "SELECT metric, count() as services, "
         "round(avg(baseline_value), 4) as avg_baseline, "
         "round(avg(breach_ratio), 4) as avg_breach_ratio "
-        "FROM metrics.ai_baseline_view_2 "
+        f"FROM {VIEW} "
         "GROUP BY metric ORDER BY metric"
     )
     print(f"\n{'metric':<16} {'services':>10} {'avg_baseline':>14} {'avg_breach_ratio':>18}")
@@ -84,19 +88,19 @@ def main():
         "SELECT application_id, service, metric, "
         "round(baseline_value, 4) as baseline_value, "
         "round(breach_ratio, 4) as breach_ratio "
-        "FROM metrics.ai_baseline_view_2 "
+        f"FROM {VIEW} "
         "WHERE breach_ratio >= 0.6 "
         "ORDER BY breach_ratio DESC "
         "LIMIT 20"
     )
     chronic_count = client.command(
-        "SELECT count() FROM metrics.ai_baseline_view_2 WHERE breach_ratio >= 0.6"
+        f"SELECT count() FROM {VIEW} WHERE breach_ratio >= 0.6"
     )
     at_risk_count = client.command(
-        "SELECT count() FROM metrics.ai_baseline_view_2 WHERE breach_ratio >= 0.3 AND breach_ratio < 0.6"
+        f"SELECT count() FROM {VIEW} WHERE breach_ratio >= 0.3 AND breach_ratio < 0.6"
     )
     healthy_count = client.command(
-        "SELECT count() FROM metrics.ai_baseline_view_2 WHERE breach_ratio < 0.3"
+        f"SELECT count() FROM {VIEW} WHERE breach_ratio < 0.3"
     )
 
     print(f"\nBaseline state breakdown:")
@@ -113,7 +117,7 @@ def main():
             print(f"{row[0]:>8} {row[2]:<16} {row[3]:>10} {row[4]:>14}  {svc}")
 
     client.close()
-    logger.info("\n[OK] Done. ai_baseline_view_2 is up to date.")
+    logger.info(f"\n[OK] Done. {TABLES['baseline_view']} is up to date.")
 
 
 if __name__ == "__main__":

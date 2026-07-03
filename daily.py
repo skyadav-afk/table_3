@@ -355,9 +355,9 @@ if __name__ == "__main__":
     import clickhouse_connect
     from fetch_data import main as fetch_all_data
     from run_log import log_run
-    from db_config import CLICKHOUSE_CONFIG
+    from db_config import CLICKHOUSE_CONFIG, TABLES
 
-    TARGET_TABLE = 'ai_service_behavior_memory'
+    TARGET_TABLE = TABLES['behavior_memory']
 
     # Configure logging
     logging.basicConfig(
@@ -428,7 +428,7 @@ if __name__ == "__main__":
 
             logger.info(f"\nInserting {len(daily_df)} rows into {TARGET_TABLE}...")
             client.insert_df(TARGET_TABLE, daily_df)
-            client.command('OPTIMIZE TABLE ai_service_behavior_memory FINAL')
+            client.command(f'OPTIMIZE TABLE {TARGET_TABLE} FINAL')
             logger.info("[OK] Forced merge complete — duplicates collapsed")
 
             logger.info(f"[OK] Successfully wrote {len(daily_df)} patterns to {TARGET_TABLE}")

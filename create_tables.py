@@ -6,13 +6,15 @@ Run before starting the pipeline for the first time.
 import logging
 import clickhouse_connect
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-CREATE_BEHAVIOR_MEMORY_SQL = """
-CREATE TABLE IF NOT EXISTS metrics.ai_service_behavior_memory
+DB = CLICKHOUSE_CONFIG['database']
+
+CREATE_BEHAVIOR_MEMORY_SQL = f"""
+CREATE TABLE IF NOT EXISTS {DB}.{TABLES['behavior_memory']}
 (
     project_id        UInt32,
     application_id    UInt32,
@@ -45,8 +47,8 @@ TTL multiIf(
 )
 """
 
-CREATE_STAGING_SQL = """
-CREATE TABLE IF NOT EXISTS metrics.ai_detector_staging1
+CREATE_STAGING_SQL = f"""
+CREATE TABLE IF NOT EXISTS {DB}.{TABLES['staging']}
 (
     project_id        UInt32,
     application_id    UInt32,
@@ -81,19 +83,19 @@ def main():
     version = client.command('SELECT version()')
     logger.info(f"Connected to ClickHouse {version}")
 
-    logger.info("\nCreating ai_service_behavior_memory...")
+    logger.info(f"\nCreating {TABLES['behavior_memory']}...")
     client.command(CREATE_BEHAVIOR_MEMORY_SQL)
-    logger.info("[OK] ai_service_behavior_memory ready")
+    logger.info(f"[OK] {TABLES['behavior_memory']} ready")
 
-    logger.info("\nCreating ai_detector_staging1...")
+    logger.info(f"\nCreating {TABLES['staging']}...")
     client.command(CREATE_STAGING_SQL)
-    logger.info("[OK] ai_detector_staging1 ready")
+    logger.info(f"[OK] {TABLES['staging']} ready")
 
     logger.info("\nVerifying tables:")
-    for table in ['ai_service_behavior_memory', 'ai_detector_staging1']:
-        count = client.command(f"SELECT count() FROM metrics.{table}")
+    for table in [TABLES['behavior_memory'], TABLES['staging']]:
+        count = client.command(f"SELECT count() FROM {DB}.{table}")
         cols = client.command(
-            f"SELECT count() FROM system.columns WHERE database = 'metrics' AND table = '{table}'"
+            f"SELECT count() FROM system.columns WHERE database = '{DB}' AND table = '{table}'"
         )
         logger.info(f"  {table}: {cols} columns, {count} rows")
 

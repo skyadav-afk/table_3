@@ -7,16 +7,21 @@ Run this script to refresh the 30-day baseline stats view.
 import logging
 import clickhouse_connect
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-CREATE_VIEW_SQL = """
-CREATE OR REPLACE VIEW metrics.ai_baseline_stats_30d AS
+DB = CLICKHOUSE_CONFIG['database']
+VIEW = f"{DB}.{TABLES['baseline_stats_30d']}"
+BASELINE_VIEW = f"{DB}.{TABLES['baseline_view']}"
+HOURLY = f"{DB}.{TABLES['hourly']}"
+
+CREATE_VIEW_SQL = f"""
+CREATE OR REPLACE VIEW {VIEW} AS
 WITH core AS (
     SELECT *
-    FROM metrics.ai_baseline_view_2
+    FROM {BASELINE_VIEW}
 ),
 
 delta_calc AS (
@@ -32,7 +37,7 @@ delta_calc AS (
 
         h.ts_hour
 
-    FROM metrics.ai_service_features_hourly h
+    FROM {HOURLY} h
     INNER JOIN core c
         ON h.project_id     = c.project_id
        AND h.application_id = c.application_id
@@ -41,7 +46,7 @@ delta_calc AS (
 
     WHERE h.ts_hour >= (
         SELECT max(ts_hour) - INTERVAL 30 DAY
-        FROM metrics.ai_service_features_hourly
+        FROM {HOURLY}
     )
 )
 
@@ -67,7 +72,7 @@ GROUP BY
 
 def main():
     logger.info("=" * 70)
-    logger.info("UPDATE ai_baseline_stats_30d")
+    logger.info(f"UPDATE {TABLES['baseline_stats_30d']}")
     logger.info("=" * 70)
 
     try:
@@ -76,12 +81,12 @@ def main():
         logger.info(f"Connected to ClickHouse {version}")
 
         # Recreate the view
-        logger.info("\nRecreating ai_baseline_stats_30d view...")
+        logger.info(f"\nRecreating {TABLES['baseline_stats_30d']} view...")
         client.command(CREATE_VIEW_SQL)
         logger.info("[OK] View recreated successfully")
 
         # Total rows in the view
-        total = client.command("SELECT count() FROM metrics.ai_baseline_stats_30d")
+        total = client.command(f"SELECT count() FROM {VIEW}")
         logger.info(f"Total rows in view: {total}")
 
         # Break down by metric to perform a quick sanity test
@@ -90,7 +95,7 @@ def main():
             "SELECT metric, count() as services, "
             "round(avg(delta_median_success), 4) as avg_success_delta, "
             "round(avg(delta_median_latency), 4) as avg_latency_delta "
-            "FROM metrics.ai_baseline_stats_30d "
+            f"FROM {VIEW} "
             "GROUP BY metric ORDER BY metric"
         )
         print(f"\n{'metric':<16} {'services':>10} {'avg_success_delta':>20} {'avg_latency_delta':>20}")
@@ -99,7 +104,7 @@ def main():
             print(f"{str(row[0]):<16} {str(row[1]):>10} {str(row[2]):>20} {str(row[3]):>20}")
 
         client.close()
-        logger.info("\n[OK] Done. ai_baseline_stats_30d is up to date.")
+        logger.info(f"\n[OK] Done. {TABLES['baseline_stats_30d']} is up to date.")
 
     except Exception as e:
         logger.error(f"Failed to update view: {e}")

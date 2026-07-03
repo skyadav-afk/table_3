@@ -14,13 +14,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from db_config import CLICKHOUSE_CONFIG
+from db_config import CLICKHOUSE_CONFIG, TABLES
 
-TABLE_NAME = 'ai_detector_staging1'
-BASELINE_VIEW = 'ai_baseline_view_2'
-BASELINE_VIEW_30D = 'ai_baseline_stats_30d'
-HOURLY_TABLE = 'ai_service_features_hourly'  # Will try this first, fallback to ai_service_features_hourly
-METRICS_5M_TABLE = 'ai_metrics_5m'  # 5-minute metrics table for volume.py
+TABLE_NAME = TABLES['staging']
+BASELINE_VIEW = TABLES['baseline_view']
+BASELINE_VIEW_30D = TABLES['baseline_stats_30d']
+HOURLY_TABLE = TABLES['hourly']
+METRICS_5M_TABLE = TABLES['metrics_5m']  # 5-minute metrics table, used by volume1.py
 
 
 def fetch_data_to_dataframe():
@@ -208,20 +208,17 @@ def fetch_hourly_data():
         version = client.command('SELECT version()')
         logger.info(f"Successfully connected to ClickHouse version: {version}")
 
-        # Try to determine which table exists
+        # Verify the configured hourly table exists
         table_to_use = None
-        for table_name in [HOURLY_TABLE, 'ai_service_features_hourly']:
-            try:
-                check_query = f"SELECT 1 FROM {table_name} LIMIT 1"
-                client.command(check_query)
-                table_to_use = table_name
-                logger.info(f"Found table: {table_name}")
-                break
-            except Exception:
-                continue
+        try:
+            client.command(f"SELECT 1 FROM {HOURLY_TABLE} LIMIT 1")
+            table_to_use = HOURLY_TABLE
+            logger.info(f"Found table: {HOURLY_TABLE}")
+        except Exception:
+            pass
 
         if not table_to_use:
-            raise Exception("Neither service_metrics_hourly_2 nor ai_service_features_hourly table found")
+            raise Exception(f"Table {HOURLY_TABLE} not found")
 
         # Build query for hourly data - include service_id
         query = f"""
@@ -265,7 +262,7 @@ def fetch_hourly_data():
 
 def fetch_5m_data():
     """
-    Connect to ClickHouse and fetch 5-minute metrics data from ai_metrics_5m_v2
+    Connect to ClickHouse and fetch 5-minute metrics data from ai_metrics_5m
     This data is used specifically for volume.py pattern detection
 
     Returns:
@@ -274,7 +271,7 @@ def fetch_5m_data():
                          success_rate, p90_latency, total_count,
                          day_of_week, hour, minute_bucket
 
-    Note: The table ai_metrics_5m_v2 does not have a 'metric' column.
+    Note: The table ai_metrics_5m does not have a 'metric' column.
           We need to create separate rows for success_rate and latency metrics.
     """
     try:
@@ -296,7 +293,7 @@ def fetch_5m_data():
         logger.info(f"Successfully connected to ClickHouse version: {version}")
 
         # Build query for 5-minute metrics data - include service_id if available
-        # Note: ai_metrics_5m_v2 has 'ts' instead of 'ts_hour', and no 'metric' column
+        # Note: ai_metrics_5m has 'ts' instead of 'ts_hour', and no 'metric' column
         # Try to include service_id, but handle gracefully if it doesn't exist
         try:
             # First check if service_id column exists
@@ -484,7 +481,7 @@ def main():
 
         # Fetch 5-minute metrics data
         logger.info("\n" + "=" * 60)
-        logger.info("TASK 5: Fetching 5-Minute Metrics Data from ai_metrics_5m_v2")
+        logger.info("TASK 5: Fetching 5-Minute Metrics Data from ai_metrics_5m")
         logger.info("=" * 60)
 
         metrics_5m_df = fetch_5m_data()
