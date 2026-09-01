@@ -57,6 +57,23 @@ def run_script(script: str) -> bool:
     return True
 
 
+def run_script_with_retry(script: str, attempts: int = 2, delay_seconds: int = 30) -> bool:
+    """Run a script, retrying on failure. Covers transient failures (e.g. a
+    source table that hasn't landed yet right after a fresh deploy/restart)
+    without needing a guessed fixed startup sleep."""
+    for attempt in range(1, attempts + 1):
+        if run_script(script):
+            return True
+        if attempt < attempts:
+            logger.warning(
+                "%s failed (attempt %d/%d) - retrying in %ds",
+                script, attempt, attempts, delay_seconds,
+            )
+            time.sleep(delay_seconds)
+    logger.error("%s failed after %d attempts", script, attempts)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
@@ -71,7 +88,7 @@ def hourly_job():
 def daily_job():
     """Daily at 00:35: refresh baselines, stage candidates, run daily patterns."""
     logger.info("=== Daily job: baseline -> staging -> daily ===")
-    ok = run_script("baseline_view.py")
+    ok = run_script_with_retry("baseline_view.py")
     if not ok:
         logger.error("baseline_view.py failed - aborting daily job")
         return
