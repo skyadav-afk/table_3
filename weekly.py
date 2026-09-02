@@ -64,7 +64,7 @@ def volume_ok(window_volume, median_volume):
 
 ## Seasonality Promoter (Weekly only)
 
-def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode, anchor):
+def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode, tenant_anchor):
     """
     mode = 'daily_candidate' or 'weekly_candidate'
 
@@ -74,6 +74,9 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         baseline_30d_df: 30-day baseline stats with pre-calculated deltas (ai_baseline_stats_30d)
         hourly_df: Hourly metrics data
         mode: 'daily_candidate' or 'weekly_candidate'
+        tenant_anchor: pandas Series indexed by (project_id, application_id) giving each
+            tenant's own latest local day boundary (from ts_hour, which is customer-local -
+            never compare it against a UTC-derived timestamp or another tenant's anchor)
     """
     promoted = []
 
@@ -143,8 +146,11 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
                 (hourly_df.hour == hour)
             ].copy()
 
-            # Anchor to scheduled day boundary - prevents delay skew
-            max_date = anchor
+            # Anchor to THIS tenant's own local day boundary - never compare
+            # ts_hour (customer-local) against a UTC-derived or other-tenant timestamp
+            max_date = tenant_anchor.get((proj, app))
+            if max_date is None:
+                continue
 
             # LONG TERM CONFIDENCE: last N days from max date
             long_term_start = max_date - pd.Timedelta(days=CONFIG["DAILY_LONG_TERM_DAYS"] - 1)
@@ -218,8 +224,11 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
                 (hourly_df.hour == hour)
             ].copy()
 
-            # Anchor to scheduled day boundary - prevents delay skew
-            max_date = anchor
+            # Anchor to THIS tenant's own local day boundary - never compare
+            # ts_hour (customer-local) against a UTC-derived or other-tenant timestamp
+            max_date = tenant_anchor.get((proj, app))
+            if max_date is None:
+                continue
 
             # Count total weeks from hourly_df where total_windows > 0 at this day_of_week and hour
             # Use ISO week format to properly handle year boundary issues (%G = ISO year, %V = ISO week)
@@ -341,7 +350,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
 
             "first_seen": first_seen,
             "last_seen": last_seen,
-            "detected_at": datetime.utcnow()
+            "detected_at_utc": datetime.utcnow()
         })
 
     return pd.DataFrame(promoted)
@@ -387,11 +396,16 @@ if __name__ == "__main__":
     logger.info("Running WEEKLY pattern detection...")
     logger.info("=" * 80)
 
-    # Anchor to today midnight - any GitHub Actions delay is ignored
-    anchor = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    logger.info(f"\nAnchor (day boundary): {anchor}")
+    # Anchor each tenant to their OWN latest local day boundary. ts_hour is now
+    # the customer's local timezone (not UTC), and different tenants can be in
+    # different timezones, so a single UTC/global anchor would mix clocks.
+    tenant_anchor = hourly_df.groupby(['project_id', 'application_id'])['ts_hour'].max().dt.normalize()
+    logger.info(f"\nPer-tenant local day-boundary anchors computed for {len(tenant_anchor)} tenant(s)")
 
-    weekly_df = promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode="weekly_candidate", anchor=anchor)
+    # Diagnostic-only value for ai_pattern_run_log - never used for filtering
+    run_log_anchor = tenant_anchor.max() if len(tenant_anchor) > 0 else datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    weekly_df = promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode="weekly_candidate", tenant_anchor=tenant_anchor)
 
     logger.info("\n" + "=" * 80)
     logger.info("RESULTS")
@@ -442,14 +456,14 @@ if __name__ == "__main__":
             logger.info("[OK] Connection closed")
 
             print(f"\n[OK] SUCCESS: {len(weekly_df)} weekly patterns written to {TARGET_TABLE}")
-            log_run('weekly', anchor, started_at, len(weekly_df), 'success')
+            log_run('weekly', run_log_anchor, started_at, len(weekly_df), 'success')
 
         except Exception as e:
             logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
-            log_run('weekly', anchor, started_at, 0, 'failed', str(e))
+            log_run('weekly', run_log_anchor, started_at, 0, 'failed', str(e))
             print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
         print("\n[WARN]  No weekly patterns detected with current thresholds")
-        log_run('weekly', anchor, started_at, 0, 'success')
+        log_run('weekly', run_log_anchor, started_at, 0, 'success')

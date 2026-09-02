@@ -111,7 +111,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
     return None
 
 
-def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
+def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
     """
     Detect and promote sudden drop/spike patterns
 
@@ -128,20 +128,18 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
 
     promoted = []
 
-    # Use anchor (previous completed hour) - prevents delay skew
-    global_max_hour = anchor
-    logger.info(f"Global maximum hour for sudden pattern detection: {global_max_hour}")
-
-    # Filter hourly data to only the global maximum hour
-    latest_hour_df = hourly_df[hourly_df['ts_hour'] == global_max_hour]
-    logger.info(f"Services with data at global max hour: {len(latest_hour_df)}")
-
-    # Group by project_id, application_id, service, metric
-    grouped = latest_hour_df.groupby(["project_id", "application_id", "service", "metric"])
+    # Group by project_id, application_id, service, metric FIRST, then find each
+    # group's own latest hour. ts_hour is customer-local now, so a single global
+    # "latest hour" would only ever exact-match whichever tenant's clock is
+    # furthest ahead - every other tenant would silently get 0 patterns.
+    grouped = hourly_df.groupby(["project_id", "application_id", "service", "metric"])
 
     for (proj, app, svc, metric), group in grouped:
         # Extract service_id from the group (should be consistent across all rows)
         service_id = group['service_id'].iloc[0] if 'service_id' in group.columns else None
+
+        local_anchor = group['ts_hour'].max()
+        latest_group = group[group['ts_hour'] == local_anchor]
 
         base = get_baseline(baseline_df, proj, app, svc, metric)
         if base is None:
@@ -153,15 +151,15 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
 
         baseline_state = classify_baseline(breach_ratio)
 
-        # Detect sudden pattern (group is already filtered to global max hour)
-        sudden_result = detect_sudden_pattern(group, base)
+        # Detect sudden pattern at this tenant+service's own latest hour
+        sudden_result = detect_sudden_pattern(latest_group, base)
 
         if sudden_result is None:
             continue
 
         # --- VOLUME GATE ---
-        # Check volume from the latest hour (group is already at global max hour)
-        window_volume = float(group.iloc[0].total_requests)
+        # Check volume from this tenant+service's own latest hour
+        window_volume = float(latest_group.iloc[0].total_requests)
         if not volume_ok(window_volume, median_volume):
             continue
 
@@ -198,7 +196,7 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor):
 
             "first_seen": sudden_result["first_seen"],
             "last_seen": sudden_result["last_seen"],
-            "detected_at": datetime.utcnow()
+            "detected_at_utc": datetime.utcnow()
         })
 
     return pd.DataFrame(promoted)
@@ -238,22 +236,22 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to the latest hour actually present in the hourly table, not wall-clock
-    # time - if ingestion is delayed, wall-clock "previous completed hour" may not
-    # have landed yet, causing the exact-match filter in promote_sudden() to find 0 rows.
+    # Per-tenant+service anchors are computed inside promote_sudden() itself (each
+    # group uses its own ts_hour.max()) - this top-level value is only a
+    # diagnostic/log-friendly stand-in for ai_pattern_run_log, never used for filtering
     if len(hourly_df) > 0 and hourly_df['ts_hour'].notna().any():
-        anchor = hourly_df['ts_hour'].max().to_pydatetime()
+        run_log_anchor = hourly_df['ts_hour'].max().to_pydatetime()
     else:
-        anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - pd.Timedelta(hours=1)
-        logger.warning("No hourly data available - falling back to wall-clock anchor")
-    logger.info(f"\nAnchor (latest hour present in hourly data): {anchor}")
+        run_log_anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0) - pd.Timedelta(hours=1)
+        logger.warning("No hourly data available - nothing to anchor to")
+    logger.info(f"\nRun-log reference timestamp: {run_log_anchor}")
 
     # Run sudden pattern detection
     logger.info("\n" + "=" * 80)
     logger.info("Running sudden pattern detection...")
     logger.info("=" * 80)
 
-    sudden_df = promote_sudden(baseline_df, baseline_30d_df, hourly_df, anchor)
+    sudden_df = promote_sudden(baseline_df, baseline_30d_df, hourly_df)
 
     logger.info("\n" + "=" * 80)
     logger.info("RESULTS")
@@ -304,11 +302,11 @@ if __name__ == "__main__":
             logger.info("[OK] Connection closed")
 
             print(f"\n[OK] SUCCESS: {len(sudden_df)} sudden patterns written to {TARGET_TABLE}")
-            log_run('sudden', anchor, started_at, len(sudden_df), 'success')
+            log_run('sudden', run_log_anchor, started_at, len(sudden_df), 'success')
 
         except Exception as e:
             logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
-            log_run('sudden', anchor, started_at, 0, 'failed', str(e))
+            log_run('sudden', run_log_anchor, started_at, 0, 'failed', str(e))
             print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
@@ -316,5 +314,5 @@ if __name__ == "__main__":
         print("\n[WARN]  No sudden patterns detected with current thresholds")
         print(f"   - Success drop threshold: >= {CONFIG['SUDDEN_SUCCESS_DROP']}%")
         print(f"   - Latency spike threshold: >= {CONFIG['SUDDEN_LATENCY_SPIKE']}s")
-        log_run('sudden', anchor, started_at, 0, 'success')
+        log_run('sudden', run_log_anchor, started_at, 0, 'success')
 

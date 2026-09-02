@@ -33,17 +33,17 @@ CREATE TABLE IF NOT EXISTS {DB}.{TABLES['behavior_memory']}
     recency           Nullable(Float64),
     first_seen        DateTime,
     last_seen         DateTime,
-    detected_at       DateTime
+    detected_at_utc   DateTime
 )
-ENGINE = ReplacingMergeTree(detected_at)
+ENGINE = ReplacingMergeTree(detected_at_utc)
 ORDER BY (project_id, application_id, service_id, metric, pattern_type, pattern_window)
 TTL multiIf(
-    pattern_type = 'daily',                              detected_at + INTERVAL 45 DAY,
-    pattern_type = 'weekly',                             detected_at + INTERVAL 90 DAY,
-    pattern_type IN ('drift_up', 'drift_down'),          detected_at + INTERVAL 14 DAY,
-    pattern_type IN ('sudden_drop', 'sudden_spike'),     detected_at + INTERVAL 3 DAY,
-    pattern_type = 'volume_driven',                      detected_at + INTERVAL 30 DAY,
-    detected_at + INTERVAL 9999 DAY
+    pattern_type = 'daily',                              detected_at_utc + INTERVAL 45 DAY,
+    pattern_type = 'weekly',                             detected_at_utc + INTERVAL 90 DAY,
+    pattern_type IN ('drift_up', 'drift_down'),          detected_at_utc + INTERVAL 14 DAY,
+    pattern_type IN ('sudden_drop', 'sudden_spike'),     detected_at_utc + INTERVAL 3 DAY,
+    pattern_type = 'volume_driven',                      detected_at_utc + INTERVAL 30 DAY,
+    detected_at_utc + INTERVAL 9999 DAY
 )
 """
 

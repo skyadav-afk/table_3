@@ -19,29 +19,37 @@ HOURLY = f"{DB}.{TABLES['hourly']}"
 
 CREATE_VIEW_SQL = f"""
 CREATE OR REPLACE VIEW {VIEW} AS
+WITH tenant_max AS (
+    -- ts_hour is the customer's local timezone, and different tenants (project_id +
+    -- application_id) can be in different timezones - so each tenant's 14-day
+    -- window must be anchored to their OWN latest local data, not one global MAX().
+    SELECT project_id, application_id, MAX(ts_hour) AS max_ts_hour
+    FROM {HOURLY}
+    GROUP BY project_id, application_id
+)
 SELECT
-    project_id,
-    application_id,
-    service,
-    metric,
+    f.project_id,
+    f.application_id,
+    f.service,
+    f.metric,
     CASE
-        WHEN metric = 'success_rate' THEN quantile(0.5)(success_rate_p50)
-        WHEN metric = 'latency'      THEN quantile(0.5)(success_rate_p50)
+        WHEN f.metric = 'success_rate' THEN quantile(0.5)(f.success_rate_p50)
+        WHEN f.metric = 'latency'      THEN quantile(0.5)(f.success_rate_p50)
     END AS baseline_value,
     CASE
-        WHEN metric = 'success_rate' THEN 0
-        WHEN metric = 'latency'      THEN quantile(0.5)(p90_latency)
+        WHEN f.metric = 'success_rate' THEN 0
+        WHEN f.metric = 'latency'      THEN quantile(0.5)(f.p90_latency)
     END AS baseline_value_p90,
     CASE
-        WHEN metric = 'success_rate' THEN quantile(0.5)(total_requests)
-        WHEN metric = 'latency'      THEN quantile(0.5)(total_requests)
+        WHEN f.metric = 'success_rate' THEN quantile(0.5)(f.total_requests)
+        WHEN f.metric = 'latency'      THEN quantile(0.5)(f.total_requests)
     END AS median_hour_volumne,
-    sum(bad_windows) / sum(total_windows) AS breach_ratio
-FROM {HOURLY}
-WHERE ts_hour >= (
-    SELECT MAX(ts_hour) FROM {HOURLY}
-) - INTERVAL 14 DAY
-GROUP BY project_id, application_id, service, metric
+    sum(f.bad_windows) / sum(f.total_windows) AS breach_ratio
+FROM {HOURLY} f
+INNER JOIN tenant_max t
+    ON f.project_id = t.project_id AND f.application_id = t.application_id
+WHERE f.ts_hour >= t.max_ts_hour - INTERVAL 14 DAY
+GROUP BY f.project_id, f.application_id, f.service, f.metric
 """
 
 

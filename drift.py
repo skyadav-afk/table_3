@@ -49,7 +49,7 @@ def classify_baseline(breach_ratio):
 
 ## Drift Detection
 
-def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
+def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, max_date):
     """
     Detect drift pattern from recent hourly data
 
@@ -57,7 +57,8 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
         hourly_subset: Hourly data filtered for specific app/service/metric
         baseline_row: Baseline stats from ai_baseline_view_2
         baseline_30d: 30-day baseline stats with pre-calculated deltas
-        anchor: Fixed hour boundary (datetime truncated to hour) - prevents delay skew
+        max_date: this tenant+service's own latest ts_hour (customer-local) - never a
+            UTC timestamp, and never shared across tenants/services
 
     Returns:
         dict with drift pattern info or None
@@ -67,8 +68,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
 
     is_grid = baseline_row["metric"] == "success_rate" and "grid" in baseline_row["service"].lower()
 
-    # Get last N hours of data anchored to scheduled hour boundary, not actual runtime
-    max_date = anchor
+    # Get last N hours of data anchored to this tenant+service's own latest hour
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(hours=CONFIG["DRIFT_HOURS"])]
 
     if is_grid:
@@ -151,7 +151,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     }
 
 
-def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
+def promote_drift(baseline_df, baseline_30d_df, hourly_df):
     """
     Detect and promote drift patterns (drift_up and drift_down)
 
@@ -175,6 +175,10 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
         # Extract service_id from the group (should be consistent across all rows)
         service_id = group['service_id'].iloc[0] if 'service_id' in group.columns else None
 
+        # Anchor to THIS tenant+service's own latest local hour (ts_hour is
+        # customer-local) - never a global/UTC value shared across tenants
+        max_date = group['ts_hour'].max()
+
         # Debug logging for success_rate
         if metric == "success_rate" and "grid" in svc.lower():
             logger.info(f"DEBUG: Processing {app}, {svc[:50]}, {metric}")
@@ -194,7 +198,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
         baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
         # Detect drift pattern
-        drift_result = detect_drift_pattern(group, base, baseline_30d, anchor)
+        drift_result = detect_drift_pattern(group, base, baseline_30d, max_date)
 
         if drift_result is None:
             if metric == "success_rate" and "grid" in svc.lower():
@@ -205,8 +209,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
             logger.info(f"DEBUG: drift_result = {drift_result}")
 
         # --- VOLUME GATE ---
-        # Use last N days anchored to scheduled hour boundary
-        max_date = anchor
+        # Use last N days anchored to this tenant+service's own latest hour
         volume_window_start = max_date - pd.Timedelta(days=CONFIG["DRIFT_VOLUME_GATE_DAYS"] - 1)
 
         recent_30d = group[
@@ -259,7 +262,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor):
 
             "first_seen": drift_result["first_seen"],
             "last_seen": drift_result["last_seen"],
-            "detected_at": datetime.utcnow()
+            "detected_at_utc": datetime.utcnow()
         })
 
     return pd.DataFrame(promoted)
@@ -299,21 +302,22 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to the latest hour actually present in the hourly table, not wall-clock
-    # time - keeps the 24h drift window aligned with real data even if ingestion lags.
+    # Per-tenant+service anchors are computed inside promote_drift() itself (each
+    # group uses its own ts_hour.max()) - this top-level value is only a
+    # diagnostic/log-friendly stand-in for ai_pattern_run_log, never used for filtering
     if len(hourly_df) > 0 and hourly_df['ts_hour'].notna().any():
-        anchor = hourly_df['ts_hour'].max().to_pydatetime()
+        run_log_anchor = hourly_df['ts_hour'].max().to_pydatetime()
     else:
-        anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
-        logger.warning("No hourly data available - falling back to wall-clock anchor")
-    logger.info(f"\nAnchor (latest hour present in hourly data): {anchor}")
+        run_log_anchor = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        logger.warning("No hourly data available - nothing to anchor to")
+    logger.info(f"\nRun-log reference timestamp: {run_log_anchor}")
 
     # Run drift pattern detection
     logger.info("\n" + "=" * 80)
     logger.info("Running drift pattern detection...")
     logger.info("=" * 80)
 
-    drift_df = promote_drift(baseline_df, baseline_30d_df, hourly_df, anchor)
+    drift_df = promote_drift(baseline_df, baseline_30d_df, hourly_df)
 
     logger.info("\n" + "=" * 80)
     logger.info("RESULTS")
@@ -364,11 +368,11 @@ if __name__ == "__main__":
             logger.info("[OK] Connection closed")
 
             print(f"\n[OK] SUCCESS: {len(drift_df)} drift patterns written to {TARGET_TABLE}")
-            log_run('drift', anchor, started_at, len(drift_df), 'success')
+            log_run('drift', run_log_anchor, started_at, len(drift_df), 'success')
 
         except Exception as e:
             logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
-            log_run('drift', anchor, started_at, 0, 'failed', str(e))
+            log_run('drift', run_log_anchor, started_at, 0, 'failed', str(e))
             print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
@@ -376,4 +380,4 @@ if __name__ == "__main__":
         print("\n[WARN]  No drift patterns detected with current thresholds")
         print(f"   - Drift window: {CONFIG['DRIFT_HOURS']} hours")
         print(f"   - Minimum hours required: {CONFIG['DRIFT_MIN_HOURS']}")
-        log_run('drift', anchor, started_at, 0, 'success')
+        log_run('drift', run_log_anchor, started_at, 0, 'success')

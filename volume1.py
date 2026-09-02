@@ -49,7 +49,7 @@ def classify_baseline(breach_ratio):
 
 ## Volume-Driven Detection
 
-def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
+def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, max_date):
     """
     Detect volume-driven pattern from hourly data
 
@@ -57,6 +57,8 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
         hourly_subset: Hourly data filtered for specific app/service/metric
         baseline_row: Baseline stats from ai_baseline_view_2
         baseline_30d: 30-day baseline stats with pre-calculated deltas
+        max_date: this tenant's own local day boundary (from ts_hour) - never a
+            UTC-derived timestamp, and never shared across tenants
 
     Returns:
         dict with volume pattern info or None
@@ -68,8 +70,7 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     if len(hourly_subset) < CONFIG["VOLUME_MIN_DATA_POINTS"]:
         return None
 
-    # Get last N days anchored to scheduled day boundary - prevents delay skew
-    max_date = anchor
+    # Get last N days anchored to this tenant's own day boundary - prevents delay skew
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(days=CONFIG["VOLUME_TIME_WINDOW_DAYS"])]
 
     if len(recent) < CONFIG["VOLUME_MIN_DATA_POINTS"]:  # Need at least N hours of data in last N days
@@ -129,7 +130,7 @@ def detect_volume_pattern(hourly_subset, baseline_row, baseline_30d, anchor):
     }
 
 
-def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
+def promote_volume(baseline_df, baseline_30d_df, hourly_df, tenant_anchor):
     """
     Detect and promote volume-driven patterns
 
@@ -137,6 +138,8 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
         baseline_df: Baseline stats (ai_baseline_view_2)
         baseline_30d_df: 30-day baseline stats with pre-calculated deltas (ai_baseline_stats_30d)
         hourly_df: Hourly metrics data
+        tenant_anchor: pandas Series indexed by (project_id, application_id) giving each
+            tenant's own latest local day boundary (from ts_hour, which is customer-local)
 
     Returns:
         DataFrame with promoted volume-driven patterns
@@ -151,7 +154,11 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
 
     for (proj, app, svc, metric), group in grouped:
         service_id = group['service_id'].iloc[0] if 'service_id' in group.columns else None
-        
+
+        max_date = tenant_anchor.get((proj, app))
+        if max_date is None:
+            continue
+
         base = get_baseline(baseline_df, proj, app, svc, metric)
         if base is None:
             continue
@@ -166,18 +173,17 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
         baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
         # Detect volume-driven pattern
-        volume_result = detect_volume_pattern(group, base, baseline_30d, anchor)
+        volume_result = detect_volume_pattern(group, base, baseline_30d, max_date)
 
         if volume_result is None:
             continue
 
-        # Skip if last_seen data is too old (> 1 day before anchor)
-        if (anchor - volume_result["last_seen"]) > pd.Timedelta(days=1):
+        # Skip if last_seen data is too old (> 1 day before this tenant's own anchor)
+        if (max_date - volume_result["last_seen"]) > pd.Timedelta(days=1):
             continue
 
         # --- VOLUME GATE ---
-        # Use last N days anchored to scheduled day boundary
-        max_date = anchor
+        # Use last N days anchored to this tenant's own day boundary
         volume_window_start = max_date - pd.Timedelta(days=CONFIG["VOLUME_GATE_DAYS"] - 1)
 
         recent_30d = group[
@@ -225,7 +231,7 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor):
 
             "first_seen": volume_result["first_seen"],
             "last_seen": volume_result["last_seen"],
-            "detected_at": datetime.utcnow()
+            "detected_at_utc": datetime.utcnow()
         })
 
     return pd.DataFrame(promoted)
@@ -260,15 +266,20 @@ if __name__ == "__main__":
     logger.info(f"  - 30-day baseline: {baseline_30d_df.shape[0]} rows")
     logger.info(f"  - Hourly: {hourly_df.shape[0]} rows")
 
-    # Anchor to today midnight - any GitHub Actions delay is ignored
-    anchor = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    logger.info(f"\nAnchor (day boundary): {anchor}")
+    # Anchor each tenant to their OWN latest local day boundary. ts_hour is now
+    # the customer's local timezone (not UTC), and different tenants can be in
+    # different timezones, so a single UTC/global anchor would mix clocks.
+    tenant_anchor = hourly_df.groupby(['project_id', 'application_id'])['ts_hour'].max().dt.normalize()
+    logger.info(f"\nPer-tenant local day-boundary anchors computed for {len(tenant_anchor)} tenant(s)")
+
+    # Diagnostic-only value for ai_pattern_run_log - never used for filtering
+    run_log_anchor = tenant_anchor.max() if len(tenant_anchor) > 0 else datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     logger.info("\n" + "=" * 80)
     logger.info("Running VOLUME-DRIVEN pattern detection...")
     logger.info("=" * 80)
 
-    volume_df = promote_volume(baseline_df, baseline_30d_df, hourly_df, anchor)
+    volume_df = promote_volume(baseline_df, baseline_30d_df, hourly_df, tenant_anchor)
 
     logger.info(f"\n[OK] Volume-driven patterns detected: {len(volume_df)}")
 
@@ -310,14 +321,14 @@ if __name__ == "__main__":
             logger.info("[OK] Connection closed")
 
             print(f"\n[OK] SUCCESS: {len(volume_df)} volume-driven patterns written to {TARGET_TABLE}")
-            log_run('volume', anchor, started_at, len(volume_df), 'success')
+            log_run('volume', run_log_anchor, started_at, len(volume_df), 'success')
 
         except Exception as e:
             logger.error(f"\n[FAIL] Failed to write to ClickHouse: {str(e)}")
-            log_run('volume', anchor, started_at, 0, 'failed', str(e))
+            log_run('volume', run_log_anchor, started_at, 0, 'failed', str(e))
             print(f"\n[WARN]  Patterns saved to CSV but failed to write to ClickHouse")
             raise
 
     else:
         print("\n[WARN]  No volume-driven patterns detected with current thresholds")
-        log_run('volume', anchor, started_at, 0, 'success')
+        log_run('volume', run_log_anchor, started_at, 0, 'success')

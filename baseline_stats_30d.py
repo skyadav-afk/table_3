@@ -19,9 +19,23 @@ HOURLY = f"{DB}.{TABLES['hourly']}"
 
 CREATE_VIEW_SQL = f"""
 CREATE OR REPLACE VIEW {VIEW} AS
-WITH core AS (
-    SELECT *
-    FROM {BASELINE_VIEW}
+WITH tenant_max AS (
+    -- ts_hour is the customer's local timezone, and different tenants (project_id +
+    -- application_id) can be in different timezones - so each tenant's 30-day
+    -- window must be anchored to their OWN latest local data, not one global MAX().
+    SELECT project_id, application_id, MAX(ts_hour) AS max_ts_hour
+    FROM {HOURLY}
+    GROUP BY project_id, application_id
+),
+
+core AS (
+    -- Merge the per-tenant anchor into the baseline row up front, so delta_calc
+    -- below only ever joins hourly against ONE source (avoids ClickHouse CTE
+    -- resolution issues when a CTE joins two other CTEs sharing column names)
+    SELECT b.*, t.max_ts_hour
+    FROM {BASELINE_VIEW} b
+    INNER JOIN tenant_max t
+        ON b.project_id = t.project_id AND b.application_id = t.application_id
 ),
 
 delta_calc AS (
@@ -44,10 +58,7 @@ delta_calc AS (
        AND h.service        = c.service
        AND h.metric         = c.metric
 
-    WHERE h.ts_hour >= (
-        SELECT max(ts_hour) - INTERVAL 30 DAY
-        FROM {HOURLY}
-    )
+    WHERE h.ts_hour >= c.max_ts_hour - INTERVAL 30 DAY
 )
 
 SELECT
