@@ -85,7 +85,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
                 "delta_success": -drop,  # Negative because it's a drop
                 "delta_latency": 0.0,
                 "confidence": 1.0,
-                "first_seen": latest["ts_hour"] - pd.Timedelta(hours=1),
+                "first_seen": latest["ts_hour"],
                 "last_seen": latest["ts_hour"],
                 "data_points": 1
             }
@@ -103,7 +103,7 @@ def detect_sudden_pattern(hourly_subset, baseline_row):
                 "delta_success": 0.0,
                 "delta_latency": spike,
                 "confidence": 1.0,
-                "first_seen": latest["ts_hour"] - pd.Timedelta(hours=1),
+                "first_seen": latest["ts_hour"],
                 "last_seen": latest["ts_hour"],
                 "data_points": 1
             }
