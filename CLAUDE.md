@@ -36,7 +36,9 @@ python stagging.py             # Populates ai_detector_staging1
 python daily.py
 python weekly.py
 python drift.py
-python volume1.py              # Reads ai_metrics_5m, not the hourly table
+python volume1.py              # Reads ai_service_features_hourly, same as the other detectors
+                                # (was originally meant to read ai_metrics_5m for finer granularity -
+                                # never fully wired up; see fetch_5m_data() note below)
 python sudden.py
 
 # 4. (Optional) Risk scores
@@ -150,7 +152,7 @@ All detector scripts import from `fetch_data.py`. Exported functions (all return
 | `fetch_baseline_data()` | `ai_baseline_view_2` |
 | `fetch_baseline_30d_data()` | `ai_baseline_stats_30d` |
 | `fetch_hourly_data()` | `ai_service_features_hourly` |
-| `fetch_5m_data()` | `ai_metrics_5m` (used only by `volume1.py`) |
+| `fetch_5m_data()` | `ai_metrics_5m` — **fetched by every detector script via `fetch_data.main()` but not consumed by any of them.** Never finished: it doesn't split rows into a `metric` column the way callers expect (its own docstring notes this is needed), so `volume1.py` runs on `fetch_hourly_data()`'s output instead, same as the other detectors. |
 
 ### ClickHouse Connection
 

@@ -259,6 +259,8 @@ if __name__ == "__main__":
     started_at = datetime.utcnow()
 
     logger.info("\nFetching all data from ClickHouse...")
+    # metrics_5m_df is unused here - fetch_5m_data() was never finished (no 'metric'
+    # column split), so this runs on hourly_df like the other detectors. See CLAUDE.md.
     staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df = fetch_all_data()
 
     logger.info("\n[OK] All data loaded successfully")

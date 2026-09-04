@@ -20,7 +20,7 @@ TABLE_NAME = TABLES['staging']
 BASELINE_VIEW = TABLES['baseline_view']
 BASELINE_VIEW_30D = TABLES['baseline_stats_30d']
 HOURLY_TABLE = TABLES['hourly']
-METRICS_5M_TABLE = TABLES['metrics_5m']  # 5-minute metrics table, used by volume1.py
+METRICS_5M_TABLE = TABLES['metrics_5m']  # 5-minute metrics table - fetched but not currently consumed by any script (see fetch_5m_data() docstring)
 
 
 def fetch_data_to_dataframe():
@@ -263,7 +263,13 @@ def fetch_hourly_data():
 def fetch_5m_data():
     """
     Connect to ClickHouse and fetch 5-minute metrics data from ai_metrics_5m
-    This data is used specifically for volume.py pattern detection
+
+    NOT CURRENTLY USED: this was meant to feed volume1.py for finer-grained
+    volume-driven detection, but was never finished - the split into a
+    'metric' column below never happened (see Note), so volume1.py runs on
+    fetch_hourly_data()'s output instead, same as the other detectors.
+    Every detector script still calls this via fetch_data.main() and discards
+    the result. Wire it in properly (see CLAUDE.md) before relying on it.
 
     Returns:
         pandas.DataFrame: DataFrame containing 5-minute metrics with columns:
