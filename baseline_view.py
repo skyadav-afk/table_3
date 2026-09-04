@@ -34,7 +34,7 @@ SELECT
     f.metric,
     CASE
         WHEN f.metric = 'success_rate' THEN quantile(0.5)(f.success_rate_p50)
-        WHEN f.metric = 'latency'      THEN quantile(0.5)(f.success_rate_p50)
+        WHEN f.metric = 'latency'      THEN quantile(0.5)(f.p90_latency)
     END AS baseline_value,
     CASE
         WHEN f.metric = 'success_rate' THEN 0

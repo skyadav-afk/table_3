@@ -35,8 +35,14 @@ SELECT
     toYear(f.ts_hour)                                             AS year,
     concat('Daily ', toString(f.hour), '-',
            toString((f.hour + 1) % 24))                           AS pattern_window,
-    f.success_rate_p50 - coalesce(b.baseline_value, 0)            AS delta_success,
-    coalesce(f.p90_latency, 0) - coalesce(b.baseline_value_p90, 0) AS delta_latency_p90,
+    CASE WHEN f.metric = 'success_rate'
+         THEN f.success_rate_p50 - coalesce(b.baseline_value, 0)
+         ELSE 0
+    END                                                            AS delta_success,
+    CASE WHEN f.metric = 'latency'
+         THEN coalesce(f.p90_latency, 0) - coalesce(b.baseline_value_p90, 0)
+         ELSE 0
+    END                                                            AS delta_latency_p90,
     f.breach_ratio                                                AS bad_ratio,
     toUInt32(f.total_requests)                                    AS total_requests,
     f.ts_hour,
@@ -62,10 +68,13 @@ SELECT
     toYear(f.ts_hour)                                             AS year,
     concat(toString(toDayOfWeek(f.ts_hour)), ' ',
            toString(f.hour), '-', toString((f.hour + 1) % 24))   AS pattern_window,
-    f.success_rate_p50 - coalesce(b.baseline_value, 0)           AS delta_success,
+    CASE WHEN f.metric = 'success_rate'
+         THEN f.success_rate_p50 - coalesce(b.baseline_value, 0)
+         ELSE 0
+    END                                                           AS delta_success,
     CASE
         WHEN f.metric = 'latency' THEN f.p90_latency - b.baseline_value_p90
-        ELSE NULL
+        ELSE 0
     END                                                           AS delta_latency_p90,
     f.breach_ratio                                               AS bad_ratio,
     toUInt32(f.total_requests)                                   AS total_requests,

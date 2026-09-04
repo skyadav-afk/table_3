@@ -55,8 +55,10 @@ def median_delta(hourly_df, proj, app, svc, metric, baseline_value):
         (hourly_df.metric == metric)
     ]
 
+    value_col = subset.success_rate_p50 if metric == "success_rate" else subset.p90_latency
+
     # Keep negative values - they convey important information
-    return np.median(subset.success_rate_p50 - baseline_value)
+    return np.median(value_col - baseline_value)
 
 def volume_ok(window_volume, median_volume):
     return window_volume >= CONFIG["VOLUME_THRESHOLD"] * median_volume
@@ -286,24 +288,27 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
         # --- GET PRE-CALCULATED DELTA VALUES FROM 30D BASELINE ---
         baseline_30d = get_baseline_30d(baseline_30d_df, proj, app, svc, metric)
 
-        if baseline_30d is not None and pd.notna(baseline_30d.delta_median_success):
-            # Use pre-calculated chronic delta
-            median_d = float(baseline_30d.delta_median_success)
-            chronic_delta_latency = float(baseline_30d.delta_median_latency) if pd.notna(baseline_30d.delta_median_latency) else 0.0
-        else:
-            # Fallback to calculated chronic delta
-            median_d = median_delta(hourly_df, proj, app, svc, metric, baseline_value)
-            chronic_delta_latency = 0.0
+        # Pick the metric-appropriate pattern-specific delta and chronic (30d)
+        # reference delta - success_rate and latency deltas must never be
+        # compared/mixed across each other (they're different units).
+        if metric == "success_rate":
+            if baseline_30d is not None and pd.notna(baseline_30d.delta_median_success):
+                median_d = float(baseline_30d.delta_median_success)
+            else:
+                median_d = median_delta(hourly_df, proj, app, svc, metric, baseline_value)
 
-        # Pattern-specific deltas (from past 30 days data)
-        window_delta = group_30d_for_volume.delta_success.median()
+            window_delta = group_30d_for_volume.delta_success.median()
+            delta_success = window_delta
+            delta_latency = 0.0
+        else:  # latency
+            if baseline_30d is not None and pd.notna(baseline_30d.delta_median_latency):
+                median_d = float(baseline_30d.delta_median_latency)
+            else:
+                median_d = median_delta(hourly_df, proj, app, svc, metric, baseline_value)
 
-        # For WEEKLY patterns: always use pattern-specific latency delta from staging data
-        # For DAILY patterns: use chronic baseline delta (existing behavior)
-        if mode == 'weekly_candidate':
-            delta_latency = group_30d_for_volume.delta_latency_p90.median()
-        else:
-            delta_latency = chronic_delta_latency
+            window_delta = group_30d_for_volume.delta_latency_p90.median()
+            delta_success = 0.0
+            delta_latency = window_delta
 
         # --- CHRONIC NOISE FILTER ---
         if abs(window_delta) <= CONFIG["DELTA_MULTIPLIER"] * abs(median_d):
@@ -338,7 +343,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             "pattern_type": pattern_type,
             "pattern_window": pattern_window,
 
-            "delta_success": round(window_delta, 2),
+            "delta_success": round(delta_success, 2),
             "delta_latency_p90": round(delta_latency, 4),  # 4 decimals for millisecond precision
 
             "support_days": int(support_days),

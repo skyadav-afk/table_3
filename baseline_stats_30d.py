@@ -46,8 +46,14 @@ delta_calc AS (
         h.service,
         h.metric,
 
-        abs(h.success_rate_p50 - c.baseline_value) AS delta_success,
-        abs(h.p90_latency - c.baseline_value_p90) AS delta_latency,
+        CASE WHEN h.metric = 'success_rate'
+             THEN abs(h.success_rate_p50 - c.baseline_value)
+             ELSE 0
+        END AS delta_success,
+        CASE WHEN h.metric = 'latency'
+             THEN abs(h.p90_latency - c.baseline_value_p90)
+             ELSE 0
+        END AS delta_latency,
 
         h.ts_hour
 
