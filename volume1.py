@@ -240,7 +240,7 @@ def promote_volume(baseline_df, baseline_30d_df, hourly_df, tenant_anchor):
 if __name__ == "__main__":
     import logging
     import clickhouse_connect
-    from fetch_data import main as fetch_all_data
+    from fetch_data import load_all_data as fetch_all_data
     from run_log import log_run
     from db_config import CLICKHOUSE_CONFIG, TABLES
 

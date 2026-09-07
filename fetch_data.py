@@ -364,6 +364,28 @@ def fetch_5m_data():
         raise
 
 
+def load_all_data():
+    """
+    Lean data loader used by the pattern-detection scripts (daily.py, weekly.py,
+    drift.py, sudden.py, volume1.py). Unlike main() below - the standalone debug
+    entrypoint for `python fetch_data.py` - this doesn't dump columns/dtypes/
+    head/info for every dataframe, just fetches and returns them.
+    """
+    staging_df = fetch_data_to_dataframe()
+    baseline_df = fetch_baseline_data()
+    baseline_30d_df = fetch_baseline_30d_data()
+    hourly_df = fetch_hourly_data()
+    metrics_5m_df = fetch_5m_data()
+
+    logger.info(
+        f"Loaded rows - staging: {len(staging_df)}, baseline: {len(baseline_df)}, "
+        f"baseline_30d: {len(baseline_30d_df)}, hourly: {len(hourly_df)}, "
+        f"metrics_5m: {len(metrics_5m_df)}"
+    )
+
+    return staging_df, baseline_df, baseline_30d_df, hourly_df, metrics_5m_df
+
+
 def main():
     """
     Main function to test the data fetching for staging, baseline, and hourly data

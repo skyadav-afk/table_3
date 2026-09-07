@@ -63,20 +63,10 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, max_date):
     Returns:
         dict with drift pattern info or None
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    is_grid = baseline_row["metric"] == "success_rate" and "grid" in baseline_row["service"].lower()
-
     # Get last N hours of data anchored to this tenant+service's own latest hour
     recent = hourly_subset[hourly_subset['ts_hour'] >= max_date - pd.Timedelta(hours=CONFIG["DRIFT_HOURS"])]
 
-    if is_grid:
-        logger.info(f"DEBUG detect_drift: recent hours = {len(recent)}, max_date = {max_date}")
-
     if len(recent) < CONFIG["DRIFT_MIN_HOURS"]:  # Need at least N hours of data
-        if is_grid:
-            logger.info(f"DEBUG detect_drift: FAIL - not enough hours ({len(recent)} < {CONFIG['DRIFT_MIN_HOURS']})")
         return None
 
     # Get baseline values
@@ -114,15 +104,7 @@ def detect_drift_pattern(hourly_subset, baseline_row, baseline_30d, max_date):
         (delta_values < 0).mean() > CONFIG["DRIFT_DIRECTION_CONSISTENCY"]
     )
 
-    if is_grid:
-        threshold = max(CONFIG["DRIFT_SUCCESS_MIN_THRESHOLD"], CONFIG["DRIFT_SUCCESS_BASELINE_MULTIPLIER"] * abs(baseline_delta)) if baseline_row['metric'] == 'success_rate' else max(CONFIG["DRIFT_LATENCY_MIN_THRESHOLD"], CONFIG["DRIFT_LATENCY_BASELINE_MULTIPLIER"] * abs(baseline_delta))
-        logger.info(f"DEBUG detect_drift: median_delta = {median_delta}, threshold = {threshold}")
-        logger.info(f"DEBUG detect_drift: is_significant = {is_significant}, direction_consistency = {direction_consistency}")
-        logger.info(f"DEBUG detect_drift: positive_ratio = {(delta_values > 0).mean()}, negative_ratio = {(delta_values < 0).mean()}")
-
     if not (is_significant and direction_consistency):
-        if is_grid:
-            logger.info(f"DEBUG detect_drift: FAIL - significance or direction check failed")
         return None
 
     # Determine drift direction
@@ -163,9 +145,6 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
     Returns:
         DataFrame with promoted drift patterns
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     promoted = []
 
     # Group by project_id, application_id, service, metric (no hour/day_of_week needed for drift)
@@ -179,13 +158,8 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
         # customer-local) - never a global/UTC value shared across tenants
         max_date = group['ts_hour'].max()
 
-        # Debug logging for success_rate
-        if metric == "success_rate" and "grid" in svc.lower():
-            logger.info(f"DEBUG: Processing {app}, {svc[:50]}, {metric}")
         base = get_baseline(baseline_df, proj, app, svc, metric)
         if base is None:
-            if metric == "success_rate" and "grid" in svc.lower():
-                logger.info(f"DEBUG: No baseline found for {svc[:50]}")
             continue
 
         baseline_value = float(base.baseline_value)
@@ -201,12 +175,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
         drift_result = detect_drift_pattern(group, base, baseline_30d, max_date)
 
         if drift_result is None:
-            if metric == "success_rate" and "grid" in svc.lower():
-                logger.info(f"DEBUG: drift_result is None for {svc[:50]}")
             continue
-
-        if metric == "success_rate" and "grid" in svc.lower():
-            logger.info(f"DEBUG: drift_result = {drift_result}")
 
         # --- VOLUME GATE ---
         # Use last N days anchored to this tenant+service's own latest hour
@@ -219,12 +188,7 @@ def promote_drift(baseline_df, baseline_30d_df, hourly_df):
 
         window_volume = recent_30d.total_requests.median()
         if not volume_ok(window_volume, median_volume):
-            if metric == "success_rate" and "grid" in svc.lower():
-                logger.info(f"DEBUG: Volume gate failed: {window_volume} < {0.3 * median_volume}")
             continue
-
-        if metric == "success_rate" and "grid" in svc.lower():
-            logger.info(f"DEBUG: Passed all checks, will promote!")
 
         # --- GET DELTA VALUES ---
         if metric == "success_rate":
@@ -274,7 +238,7 @@ if __name__ == "__main__":
     """
     import logging
     import clickhouse_connect
-    from fetch_data import main as fetch_all_data
+    from fetch_data import load_all_data as fetch_all_data
     from run_log import log_run
     from db_config import CLICKHOUSE_CONFIG, TABLES
 
