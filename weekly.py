@@ -241,11 +241,22 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             # Count bad weeks from staging data (only count if week exists in valid_weeks)
             group_copy = group.copy()
             group_copy['week_year'] = group_copy.ts_hour.dt.strftime('%G-W%V')
-            bad_weeks_set = set(group_copy[group_copy.bad_ratio >= CONFIG["BAD_RATIO_THRESHOLD"]]['week_year'])
-            bad_weeks = len(bad_weeks_set & valid_weeks)  # Intersection ensures bad_weeks <= total_weeks
+            bad_rows = group_copy[
+                (group_copy.bad_ratio >= CONFIG["BAD_RATIO_THRESHOLD"]) &
+                (group_copy.week_year.isin(valid_weeks))
+            ]
+            bad_weeks_set = set(bad_rows['week_year'])
+            bad_weeks = len(bad_weeks_set)  # already intersected with valid_weeks above
 
             support_days = bad_weeks
             repeat_ratio = bad_weeks / max(1, total_weeks) if total_weeks > 0 else 0
+
+            # first_seen/last_seen for weekly patterns should span the same bad
+            # weeks support_days/confidence are computed from (full history), not
+            # just the 30-day volume-gate window used below - otherwise support_days
+            # can report more weeks than first_seen/last_seen appear to cover
+            weekly_first_seen = bad_rows.ts_hour.min()
+            weekly_last_seen = bad_rows.ts_hour.max()
 
             # Check thresholds for weekly patterns
             if repeat_ratio < CONFIG["WEEKLY_REPEAT_THRESHOLD"] or bad_weeks < CONFIG["MIN_SUPPORT"]:
@@ -326,9 +337,16 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             day_name = day_names[dow % 7]  # Use modulo to ensure 0-6 range
             pattern_window = f"{day_name} {hour}-{(hour + 1) % 24}"
 
-        # Calculate first_seen and last_seen from past 30 days data only
-        first_seen = group_30d_for_volume.ts_hour.min()
-        last_seen = group_30d_for_volume.ts_hour.max()
+        # Daily patterns: first_seen/last_seen from the 30-day volume-gate window
+        # (matches the window long_term/recency confidence already use). Weekly
+        # patterns: use the same full-history bad weeks support_days/confidence
+        # come from, so the two never disagree.
+        if mode == 'weekly_candidate':
+            first_seen = weekly_first_seen
+            last_seen = weekly_last_seen
+        else:
+            first_seen = group_30d_for_volume.ts_hour.min()
+            last_seen = group_30d_for_volume.ts_hour.max()
 
         promoted.append({
             "project_id": proj,
