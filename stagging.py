@@ -121,20 +121,6 @@ def main():
     logger.info(f"  - daily_candidate : {daily_count}")
     logger.info(f"  - weekly_candidate: {weekly_count}")
 
-    # Quick sanity check - show a few rows
-    logger.info("\nSample rows:")
-    result = client.query(
-        "SELECT pattern_type, day_of_week, hour, count() as cnt "
-        f"FROM {STAGING} "
-        "GROUP BY pattern_type, day_of_week, hour "
-        "ORDER BY pattern_type, day_of_week, hour "
-        "LIMIT 10"
-    )
-    print(f"\n{'pattern_type':<20} {'day_of_week':>12} {'hour':>6} {'count':>8}")
-    print("-" * 50)
-    for row in result.result_rows:
-        print(f"{row[0]:<20} {row[1]:>12} {row[2]:>6} {row[3]:>8}")
-
     client.close()
     logger.info(f"\n[OK] Done. {TABLES['staging']} is up to date.")
 

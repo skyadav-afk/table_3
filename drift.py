@@ -293,9 +293,6 @@ if __name__ == "__main__":
         print(f"\nPattern breakdown:")
         print(drift_df['pattern_type'].value_counts())
 
-        print(f"\n\nFirst 10 drift patterns:")
-        print(drift_df.head(10).to_string())
-
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")

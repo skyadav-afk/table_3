@@ -41,14 +41,11 @@ def main():
     client.command(CREATE_TABLE_SQL)
     logger.info(f"[OK] {TABLES['run_log']} table created (or already exists)")
 
-    cols = client.query(f"DESCRIBE TABLE {RUN_LOG}")
-    print(f"\n{'Column':<20} {'Type':<20}")
-    print("-" * 42)
-    for row in cols.result_rows:
-        print(f"{row[0]:<20} {row[1]:<20}")
+    count = client.command(f"SELECT count() FROM {RUN_LOG}")
+    logger.info(f"  {TABLES['run_log']}: {count} rows")
 
     client.close()
-    logger.info("\n[OK] Done.")
+    logger.info("[OK] Done.")
 
 if __name__ == "__main__":
     main()

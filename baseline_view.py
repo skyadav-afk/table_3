@@ -91,16 +91,6 @@ def main():
     for row in result.result_rows:
         print(f"{row[0]:<16} {row[1]:>10} {row[2]:>14} {row[3]:>18}")
 
-    # Show CHRONIC services (breach_ratio >= 0.6)
-    chronic = client.query(
-        "SELECT application_id, service, metric, "
-        "round(baseline_value, 4) as baseline_value, "
-        "round(breach_ratio, 4) as breach_ratio "
-        f"FROM {VIEW} "
-        "WHERE breach_ratio >= 0.6 "
-        "ORDER BY breach_ratio DESC "
-        "LIMIT 20"
-    )
     chronic_count = client.command(
         f"SELECT count() FROM {VIEW} WHERE breach_ratio >= 0.6"
     )
@@ -115,14 +105,6 @@ def main():
     print(f"  CHRONIC  (>= 0.6): {chronic_count}")
     print(f"  AT_RISK  (0.3-0.6): {at_risk_count}")
     print(f"  HEALTHY  (< 0.3) : {healthy_count}")
-
-    if chronic.result_rows:
-        print(f"\nTop CHRONIC services (breach_ratio >= 0.6):")
-        print(f"{'app_id':>8} {'metric':<16} {'baseline':>10} {'breach_ratio':>14}  service")
-        print("-" * 90)
-        for row in chronic.result_rows:
-            svc = row[1][:55] + "..." if len(row[1]) > 55 else row[1]
-            print(f"{row[0]:>8} {row[2]:<16} {row[3]:>10} {row[4]:>14}  {svc}")
 
     client.close()
     logger.info(f"\n[OK] Done. {TABLES['baseline_view']} is up to date.")

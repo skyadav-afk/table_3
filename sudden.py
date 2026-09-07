@@ -263,9 +263,6 @@ if __name__ == "__main__":
         print(f"\nPattern breakdown:")
         print(sudden_df['pattern_type'].value_counts())
 
-        print(f"\n\nFirst 10 sudden patterns:")
-        print(sudden_df.head(10).to_string())
-
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")

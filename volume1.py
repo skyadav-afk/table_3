@@ -286,9 +286,8 @@ if __name__ == "__main__":
     logger.info(f"\n[OK] Volume-driven patterns detected: {len(volume_df)}")
 
     if len(volume_df) > 0:
-        print(f"\n[OK] Total patterns detected: {len(volume_df)}")
-        print(f"\nFirst 10 patterns:")
-        print(volume_df.head(10).to_string())
+        print(f"\nPattern breakdown:")
+        print(volume_df['pattern_type'].value_counts())
 
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")

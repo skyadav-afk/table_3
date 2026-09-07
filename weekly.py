@@ -422,9 +422,6 @@ if __name__ == "__main__":
         print(f"\nPattern breakdown:")
         print(weekly_df['pattern_type'].value_counts())
 
-        print(f"\n\nFirst 10 patterns:")
-        print(weekly_df.head(10).to_string())
-
         # Write to ClickHouse
         logger.info("\n" + "=" * 80)
         logger.info("Writing to ClickHouse")
