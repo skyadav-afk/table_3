@@ -4,7 +4,7 @@ Import and call log_run() at the end of each pattern script's __main__.
 """
 
 import clickhouse_connect
-from datetime import datetime, timezone
+from datetime import datetime
 
 from db_config import CLICKHOUSE_CONFIG, TABLES
 
@@ -23,7 +23,7 @@ def log_run(script_name, anchor, started_at, patterns_written, status, error_mes
         status (str):           'success' or 'failed'
         error_message (str):    exception message if status == 'failed'
     """
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.utcnow()
 
     client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     client.insert(
