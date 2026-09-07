@@ -5,7 +5,7 @@ Contains functions for promoting daily seasonal patterns based on staging data
 
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from config import CONFIG
 
 
@@ -355,7 +355,7 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
 
             "first_seen": first_seen,
             "last_seen": last_seen,
-            "detected_at_utc": datetime.utcnow()
+            "detected_at_utc": datetime.now(timezone.utc)
         })
 
     return pd.DataFrame(promoted)
@@ -384,7 +384,7 @@ if __name__ == "__main__":
     logger.info("DAILY PATTERN DETECTION - STANDALONE MODE")
     logger.info("=" * 80)
 
-    started_at = datetime.utcnow()
+    started_at = datetime.now(timezone.utc)
 
     # Fetch all required data using fetch_data.py main function
     logger.info("\nFetching all data from ClickHouse...")
@@ -408,7 +408,7 @@ if __name__ == "__main__":
     logger.info(f"\nPer-tenant local day-boundary anchors computed for {len(tenant_anchor)} tenant(s)")
 
     # Diagnostic-only value for ai_pattern_run_log - never used for filtering
-    run_log_anchor = tenant_anchor.max() if len(tenant_anchor) > 0 else datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    run_log_anchor = tenant_anchor.max() if len(tenant_anchor) > 0 else datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     daily_df = promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mode="daily_candidate", tenant_anchor=tenant_anchor)
 
