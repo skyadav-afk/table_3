@@ -83,14 +83,18 @@ CONFIG = {
     # OTHER CONFIGURATION
     # ========================================================================
     "CONFIDENCE_DECAY": 0.9,
+    # Keys match the literal pattern_type values written to ai_service_behavior_memory
+    # (not e.g. "daily_seasonal") - used both by create_tables.py's TTL clause and by
+    # each detector script's staleness gate (skip promoting a pattern whose own
+    # last_seen is already older than its type's retention window - see promote_*()).
     "TTL_DAYS": {
-        "daily_seasonal": 45,
-        "weekly_seasonal": 90,
+        "daily": 45,
+        "weekly": 90,
         "drift_up": 14,
         "drift_down": 14,
         "sudden_drop": 3,
         "sudden_spike": 3,
-        "volume_pattern": 30,
+        "volume_driven": 30,
         "chronic": None
     }
 }

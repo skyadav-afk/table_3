@@ -348,6 +348,16 @@ def promote_seasonality(staging_df, baseline_df, baseline_30d_df, hourly_df, mod
             first_seen = group_30d_for_volume.ts_hour.min()
             last_seen = group_30d_for_volume.ts_hour.max()
 
+        # --- STALENESS GATE ---
+        # Don't (re)promote a pattern whose own evidence is already older than its
+        # type's retention window - otherwise a tenant whose data has stopped
+        # advancing (frozen ts_hour) gets the same conclusion reconfirmed forever,
+        # resetting detected_at_utc every run and never actually expiring even
+        # though last_seen never gets any newer. Uses real wall-clock time, not
+        # tenant_anchor, specifically to catch a tenant whose own clock has stalled.
+        if (datetime.utcnow() - last_seen).days > CONFIG["TTL_DAYS"][pattern_type]:
+            continue
+
         promoted.append({
             "project_id": proj,
             "application_id": app,

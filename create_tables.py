@@ -38,12 +38,26 @@ CREATE TABLE IF NOT EXISTS {DB}.{TABLES['behavior_memory']}
 ENGINE = ReplacingMergeTree(detected_at_utc)
 ORDER BY (project_id, application_id, service_id, metric, pattern_type, pattern_window)
 TTL multiIf(
-    pattern_type = 'daily',                              detected_at_utc + INTERVAL 45 DAY,
-    pattern_type = 'weekly',                             detected_at_utc + INTERVAL 90 DAY,
-    pattern_type IN ('drift_up', 'drift_down'),          detected_at_utc + INTERVAL 14 DAY,
-    pattern_type IN ('sudden_drop', 'sudden_spike'),     detected_at_utc + INTERVAL 3 DAY,
-    pattern_type = 'volume_driven',                      detected_at_utc + INTERVAL 30 DAY,
-    detected_at_utc + INTERVAL 9999 DAY
+    pattern_type = 'daily',                              last_seen + INTERVAL 45 DAY,
+    pattern_type = 'weekly',                             last_seen + INTERVAL 90 DAY,
+    pattern_type IN ('drift_up', 'drift_down'),          last_seen + INTERVAL 14 DAY,
+    pattern_type IN ('sudden_drop', 'sudden_spike'),     last_seen + INTERVAL 3 DAY,
+    pattern_type = 'volume_driven',                      last_seen + INTERVAL 30 DAY,
+    last_seen + INTERVAL 9999 DAY
+)
+"""
+
+# CREATE TABLE IF NOT EXISTS above won't touch an already-existing table, so the TTL
+# also needs to be applied via ALTER for a table created before this change. Safe to
+# run every time (idempotent) - ClickHouse no-ops if the TTL already matches.
+ALTER_BEHAVIOR_MEMORY_TTL_SQL = f"""
+ALTER TABLE {DB}.{TABLES['behavior_memory']} MODIFY TTL multiIf(
+    pattern_type = 'daily',                              last_seen + INTERVAL 45 DAY,
+    pattern_type = 'weekly',                             last_seen + INTERVAL 90 DAY,
+    pattern_type IN ('drift_up', 'drift_down'),          last_seen + INTERVAL 14 DAY,
+    pattern_type IN ('sudden_drop', 'sudden_spike'),     last_seen + INTERVAL 3 DAY,
+    pattern_type = 'volume_driven',                      last_seen + INTERVAL 30 DAY,
+    last_seen + INTERVAL 9999 DAY
 )
 """
 
@@ -86,6 +100,11 @@ def main():
     logger.info(f"\nCreating {TABLES['behavior_memory']}...")
     client.command(CREATE_BEHAVIOR_MEMORY_SQL)
     logger.info(f"[OK] {TABLES['behavior_memory']} ready")
+
+    # Applies the last_seen-based TTL even if the table already existed with the
+    # older detected_at_utc-based TTL from before this change.
+    client.command(ALTER_BEHAVIOR_MEMORY_TTL_SQL)
+    logger.info(f"[OK] {TABLES['behavior_memory']} TTL set to last_seen-based expiry")
 
     logger.info(f"\nCreating {TABLES['staging']}...")
     client.command(CREATE_STAGING_SQL)

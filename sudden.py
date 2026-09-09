@@ -171,6 +171,17 @@ def promote_sudden(baseline_df, baseline_30d_df, hourly_df):
         pattern_hour = sudden_result["first_seen"]
         pattern_window = f"{pattern_hour.strftime('%Y-%m-%d %H:00')}"
 
+        # --- STALENESS GATE ---
+        # Don't (re)promote a pattern whose own evidence is already older than its
+        # type's retention window. This matters even more for sudden than daily/
+        # weekly: it runs hourly, so a frozen tenant's single-hour event would
+        # otherwise get its detected_at_utc refreshed 24x/day forever, never
+        # actually expiring even though last_seen (that one fixed hour) never
+        # changes. Uses real wall-clock time, not local_anchor, specifically to
+        # catch a tenant whose own clock has stalled.
+        if (datetime.utcnow() - sudden_result["last_seen"]).days > CONFIG["TTL_DAYS"][sudden_result["pattern_type"]]:
+            continue
+
         promoted.append({
             "project_id": proj,
             "application_id": app,
